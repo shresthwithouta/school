@@ -1,36 +1,129 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# School Workforce Management (SWM) Platform
 
-## Getting Started
+A centralized platform to assign, track, review, approve and evaluate tasks across
+all school stakeholders — Chairman, Principal, Coordinators, Managers, Accountants,
+Teachers and Team Members. Built with a role-based visibility hierarchy.
 
-First, run the development server:
+Built so far: secure authentication, the role hierarchy, dashboards, profiles,
+team management, and a full **Tasks** module (create → assign → accept → execute →
+submit → review → approve/reject) with comments, feedback, an audit trail and
+Timeliness/Quality/Accuracy evaluation. Meetings, events, approvals, reports and
+the AI features are scaffolded as "coming soon".
+
+## Tech stack
+
+- **Next.js 16** (App Router) + **React 19** + **TypeScript**
+- **Tailwind CSS v4** + **shadcn/ui** (radix-nova) — fully responsive, light/dark
+- **NextAuth / Auth.js v5** — Credentials provider, JWT sessions
+- **MongoDB** via **Mongoose** (Atlas or local)
+- **bcryptjs** for password hashing, **Zod** + **react-hook-form** for validation
+
+## Prerequisites
+
+- Node.js 20+
+- A MongoDB database — a free [Atlas](https://www.mongodb.com/atlas) cluster or a
+  local `mongod`.
+
+## Getting started
 
 ```bash
+# 1. Install dependencies
+npm install
+
+# 2. Set your connection string in .env.local
+#    MONGODB_URI="mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/school?retryWrites=true&w=majority"
+#    AUTH_SECRET=... (node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")
+
+# 3. Seed the demo accounts (optional — they also auto-seed when the DB is empty)
+npm run seed
+
+# 4. Run the dev server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000 and sign in — or click a one-click demo login on the page.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Demo accounts (auto-seeded when the users collection is empty)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Tier   | Email              | Password   |
+| ------ | ------------------ | ---------- |
+| Owner  | `owner@school.edu` | `owner123` |
+| Admin  | `admin@school.edu` | `admin123` |
+| Worker | `worker@school.edu`| `worker123`|
 
-## Learn More
+Change these from **Profile → Security** after first login. There is **no public
+sign-up** — the Owner creates every other account from **Team management**.
 
-To learn more about Next.js, take a look at the following resources:
+> **Atlas note:** `mongodb+srv://` needs an SRV DNS lookup. If your network's
+> resolver refuses SRV queries, the app routes DNS through public resolvers
+> (8.8.8.8 / 1.1.1.1) automatically — see `src/lib/db.ts`. Also allow your IP in
+> Atlas → Network Access.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Role hierarchy
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Roles keep their real titles from the requirements document. Each role maps to one
+**visibility tier** that controls who can see and manage whom.
 
-## Deploy on Vercel
+| Tier       | Can see / manage              | Roles in this tier                                                         |
+| ---------- | ----------------------------- | ------------------------------------------------------------------------- |
+| **Owner**  | Everyone                      | Chairman/Director                                                         |
+| **Admin**  | Admins + Workers (not Owners) | Principal, Academic Coordinator, Administrative Manager, Event Coordinator |
+| **Worker** | Only themselves               | Accountant, Teacher, Class Teacher, Team Member                           |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **Owner** can create/edit/delete any account and assign any role.
+- **Admin** can create/edit/delete **Worker** accounts only.
+- **Worker** has no management access and sees only their own data.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+To re-map a role to a different tier, edit `ROLE_TIERS` in
+[`src/lib/rbac.ts`](src/lib/rbac.ts).
+
+## Scripts
+
+| Command             | Description                        |
+| ------------------- | ---------------------------------- |
+| `npm run dev`       | Start the dev server               |
+| `npm run build`     | Production build                   |
+| `npm start`         | Run the production build           |
+| `npm run seed`      | Create the Owner bootstrap account |
+| `npm run lint`      | ESLint                             |
+| `npm run typecheck` | TypeScript type check              |
+
+## Project structure
+
+```
+src/
+  app/
+    login/                 # Public login page
+    (app)/                 # Authenticated area (auth-guarded layout)
+      dashboard/  profile/  users/  tasks/  meetings/  events/ ...
+    api/
+      auth/[...nextauth]/  # NextAuth route
+      users/  profile/     # REST endpoints (auth + RBAC enforced)
+  components/
+    ui/                    # shadcn/ui primitives
+    app-sidebar, app-header, nav-user, providers, ...
+    profile/  users/       # Feature components
+  lib/
+    auth.ts  auth.config.ts  # NextAuth (Node) + Edge-safe config
+    db.ts                    # Cached Mongoose connection (+ SRV DNS fix)
+    store.ts                 # User repository (MongoDB)
+    tasks.ts                 # Task data layer + lifecycle state machine
+    task-meta.ts             # Task statuses/priorities/actions (client-safe)
+    demo.ts                  # Seed/demo accounts (client-safe)
+    rbac.ts                  # Roles, tiers, permission helpers
+    users.ts                 # User data layer (visibility enforced)
+    session.ts               # Server-side auth guards
+    validation.ts            # Zod schemas
+  models/User.ts  models/Task.ts   # Mongoose models
+  components/tasks/          # Task list, dialog, detail sheet, badges
+  proxy.ts                   # Edge auth gate (Next 16 "proxy")
+scripts/seed.ts              # Seed demo accounts + print logins
+```
+
+## Security notes
+
+- Passwords are hashed with bcrypt and never returned by the API.
+- Every API route re-checks authentication and authorization server-side —
+  the UI hiding an action is never the only line of defense.
+- The Edge `proxy` only verifies the signed session cookie; Mongoose/bcrypt stay
+  in the Node runtime (Auth.js split-config pattern).
