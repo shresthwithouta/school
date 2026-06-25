@@ -11,9 +11,9 @@ const LIGHT = "#94a3b8";
 const doc = new PDFDocument({
   size: "A4",
   margins: { top: 64, bottom: 64, left: 64, right: 64 },
-  info: { Title: "SWM Platform — User Guide", Author: "SWM Platform" },
+  info: { Title: "School Workforce Management — User Guide" },
 });
-doc.pipe(createWriteStream("docs/SWM-User-Guide.pdf"));
+doc.pipe(createWriteStream("docs/User-Guide.pdf"));
 
 const bottom = () => doc.page.height - doc.page.margins.bottom;
 function ensure(space) {
@@ -61,10 +61,9 @@ function steps(items) {
 
 // ── Cover ──────────────────────────────────────────────────────────
 doc.moveDown(6);
-doc.fillColor(INDIGO).font("Helvetica-Bold").fontSize(30).text("SWM Platform");
-doc.fillColor(SLATE).font("Helvetica-Bold").fontSize(16).text("School Workforce Management");
-doc.moveDown(0.6);
-doc.fillColor(GRAY).font("Helvetica").fontSize(13).text("User Guide");
+doc.fillColor(INDIGO).font("Helvetica-Bold").fontSize(28).text("School Workforce Management");
+doc.moveDown(0.4);
+doc.fillColor(SLATE).font("Helvetica-Bold").fontSize(16).text("User Guide");
 doc.moveDown(2);
 doc
   .fillColor(GRAY)
@@ -210,7 +209,7 @@ bullets([
 ]);
 
 doc.moveDown(2);
-doc.fillColor(LIGHT).fontSize(9).text("SWM Platform — School Workforce Management · Staff user guide", {
+doc.fillColor(LIGHT).fontSize(9).text("School Workforce Management · Staff user guide", {
   align: "center",
 });
 
