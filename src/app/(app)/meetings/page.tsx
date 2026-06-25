@@ -1,20 +1,35 @@
 import type { Metadata } from "next";
 
 import { requireUser } from "@/lib/session";
+import { canManage } from "@/lib/rbac";
+import { listVisibleMeetings } from "@/lib/meetings";
+import { listVisibleUsers } from "@/lib/users";
+
 import { PageHeader } from "@/components/page-header";
-import { ComingSoon } from "@/components/coming-soon";
+import { MeetingsClient } from "@/components/meetings/meetings-client";
 
 export const metadata: Metadata = { title: "Meetings" };
 
 export default async function MeetingsPage() {
-  await requireUser();
+  const user = await requireUser();
+  const [meetings, visible] = await Promise.all([
+    listVisibleMeetings(user),
+    listVisibleUsers(user),
+  ]);
+  const people = visible.map((u) => ({ id: u.id, name: u.name, role: u.role }));
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Meetings"
-        description="Schedule meetings, record attendance, upload minutes and assign action items."
+        description="Schedule meetings, invite attendees, share notes and record minutes."
       />
-      <ComingSoon feature="Meeting management" />
+      <MeetingsClient
+        meetings={meetings}
+        people={people}
+        currentUser={{ id: user.id, role: user.role, tier: user.tier }}
+        canManage={canManage(user.role)}
+      />
     </div>
   );
 }

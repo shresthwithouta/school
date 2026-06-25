@@ -142,3 +142,34 @@ export type TransitionInput = z.infer<typeof transitionSchema>;
 export type CommentInput = z.infer<typeof commentSchema>;
 export type CreateSubtaskInput = z.infer<typeof createSubtaskSchema>;
 export type UpdateSubtaskInput = z.infer<typeof updateSubtaskSchema>;
+
+// ── Meetings ───────────────────────────────────────────────────────
+export const createMeetingSchema = z.object({
+  title: z.string().trim().min(2, "Title is too short").max(140),
+  description: richText,
+  scheduledAt: z.string().trim().optional().or(z.literal("")),
+  attendeeIds: z.array(z.string().min(1)).max(100).optional(),
+  maxAttendees: z.coerce.number().int().min(0).max(1000).optional(),
+});
+
+export const updateMeetingSchema = z.object({
+  title: z.string().trim().min(2).max(140).optional(),
+  description: richText,
+  scheduledAt: z.string().trim().optional(),
+  attendeeIds: z.array(z.string().min(1)).max(100).optional(),
+  maxAttendees: z.coerce.number().int().min(0).max(1000).optional(),
+});
+
+export const meetingMessageSchema = z.object({
+  text: z.string().max(10000).optional().or(z.literal("")),
+  attachments: z.array(attachmentSchema).max(10).optional(),
+});
+
+export const endMeetingSchema = z.object({
+  summary: richText,
+});
+
+export type CreateMeetingInput = z.infer<typeof createMeetingSchema>;
+export type UpdateMeetingInput = z.infer<typeof updateMeetingSchema>;
+export type MeetingMessageInput = z.infer<typeof meetingMessageSchema>;
+export type EndMeetingInput = z.infer<typeof endMeetingSchema>;

@@ -49,6 +49,31 @@ export function taskUrl(taskId: string) {
   return `${BASE_URL}/tasks/${taskId}`;
 }
 
+export function meetingUrl(meetingId: string) {
+  return `${BASE_URL}/meetings/${meetingId}`;
+}
+
+export async function emailMeetingInvite(args: {
+  to: string;
+  attendeeName: string;
+  title: string;
+  byName: string;
+  meetingId: string;
+  when?: string;
+}) {
+  await sendEmail({
+    to: args.to,
+    subject: `Meeting invite: ${args.title}`,
+    html: layout(
+      "You've been invited to a meeting",
+      `Hi ${args.attendeeName}, <strong>${args.byName}</strong> invited you to <strong>${args.title}</strong>${
+        args.when ? ` on <strong>${args.when}</strong>` : ""
+      }. Open it to join and follow the discussion.`,
+      { label: "Open meeting", href: meetingUrl(args.meetingId) }
+    ),
+  });
+}
+
 export async function emailTaskAssigned(args: {
   to: string;
   assigneeName: string;

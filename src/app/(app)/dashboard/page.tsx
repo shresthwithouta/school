@@ -8,6 +8,7 @@ import {
   UserPlus,
   ArrowRight,
   CalendarDays,
+  CalendarClock,
   Plus,
 } from "lucide-react";
 
@@ -15,7 +16,8 @@ import { requireUser } from "@/lib/session";
 import { canManage } from "@/lib/rbac";
 import { getTeamStats, listVisibleUsers } from "@/lib/users";
 import { getTaskStats, listVisibleTasks } from "@/lib/tasks";
-import { cn, formatDate, getInitials } from "@/lib/utils";
+import { listVisibleMeetings } from "@/lib/meetings";
+import { cn, formatDate, formatDateTime, getInitials } from "@/lib/utils";
 
 import { StatCard } from "@/components/stat-card";
 import { TierBadge } from "@/components/role-badge";
@@ -44,16 +46,22 @@ export default async function DashboardPage() {
   const manage = canManage(user.role);
   const firstName = user.name.split(" ")[0] || user.name;
 
-  const [taskStats, tasks, teamStats, recentMembers] = await Promise.all([
-    getTaskStats(user),
-    listVisibleTasks(user),
-    manage ? getTeamStats(user) : Promise.resolve(null),
-    manage
-      ? listVisibleUsers(user).then((u) =>
-          u.filter((x) => x.id !== user.id).slice(0, 5)
-        )
-      : Promise.resolve([]),
-  ]);
+  const [taskStats, tasks, teamStats, recentMembers, meetings] =
+    await Promise.all([
+      getTaskStats(user),
+      listVisibleTasks(user),
+      manage ? getTeamStats(user) : Promise.resolve(null),
+      manage
+        ? listVisibleUsers(user).then((u) =>
+            u.filter((x) => x.id !== user.id).slice(0, 5)
+          )
+        : Promise.resolve([]),
+      listVisibleMeetings(user),
+    ]);
+
+  const upcomingMeetings = meetings
+    .filter((m) => m.status === "scheduled")
+    .slice(0, 4);
 
   const myOpen = tasks
     .map((t) => ({ task: t, mine: t.assignees.find((a) => a.id === user.id) }))
@@ -291,6 +299,50 @@ export default async function DashboardPage() {
           </Card>
         )}
       </div>
+
+      {/* Upcoming meetings */}
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <div>
+            <CardTitle>Upcoming meetings</CardTitle>
+            <CardDescription>Scheduled meetings you can join</CardDescription>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/meetings">
+              View all
+              <ArrowRight className="size-4" />
+            </Link>
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {upcomingMeetings.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No upcoming meetings.</p>
+          ) : (
+            <ul className="divide-y">
+              {upcomingMeetings.map((m) => (
+                <li key={m.id}>
+                  <Link
+                    href={`/meetings/${m.id}`}
+                    className="-mx-2 flex items-center gap-3 rounded-md px-2 py-3 transition-colors hover:bg-accent/40"
+                  >
+                    <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <CalendarClock className="size-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium">{m.title}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {m.scheduledAt ? formatDateTime(m.scheduledAt) : "No time set"}
+                        {" · "}
+                        {m.joinedCount}/{m.invitedCount} joined
+                      </p>
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
