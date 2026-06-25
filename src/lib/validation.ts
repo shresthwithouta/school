@@ -102,10 +102,26 @@ export const transitionSchema = z.object({
     .optional(),
 });
 
-export const commentSchema = z.object({
-  text: z.string().min(1, "Comment cannot be empty").max(10000),
-  parentId: z.string().optional().or(z.literal("")),
+export const attachmentSchema = z.object({
+  url: z
+    .string()
+    .url()
+    .refine((u) => u.includes("res.cloudinary.com"), "Invalid upload URL"),
+  publicId: z.string().min(1),
+  resourceType: z.string().min(1),
+  format: z.string().optional().or(z.literal("")),
+  bytes: z.coerce.number().int().min(0),
+  name: z.string().min(1).max(255),
+  kind: z.enum(["image", "audio", "video", "file"]),
 });
+
+export const commentSchema = z.object({
+  text: z.string().max(10000).optional().or(z.literal("")),
+  parentId: z.string().optional().or(z.literal("")),
+  attachments: z.array(attachmentSchema).max(10).optional(),
+});
+
+export type AttachmentInput = z.infer<typeof attachmentSchema>;
 
 export const createSubtaskSchema = z.object({
   title: z.string().trim().min(2, "Title is too short").max(140),

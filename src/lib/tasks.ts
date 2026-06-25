@@ -3,8 +3,17 @@ import crypto from "crypto";
 import { connectToDatabase, stripMongo } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { cleanHtml } from "@/lib/sanitize";
+import {
+  emailTaskApproved,
+  emailTaskAssigned,
+  emailTaskSubmitted,
+} from "@/lib/email";
 import { isOwner } from "@/lib/rbac";
+import { store } from "@/lib/store";
 import { listVisibleUsers } from "@/lib/users";
+import { destroyAsset } from "@/lib/cloudinary";
+import type { Attachment } from "@/lib/attachment";
+import type { AttachmentInput } from "@/lib/validation";
 import Task from "@/models/Task";
 import type { SessionUser } from "@/lib/session";
 import type {
@@ -27,6 +36,7 @@ export type TaskComment = {
   text: string;
   kind: "comment" | "feedback" | "note";
   parentId: string | null;
+  attachments: Attachment[];
   createdAt: string;
 };
 
@@ -83,6 +93,7 @@ export type StoredTask = {
   assignees: Assignee[];
   subtasks: Subtask[];
   comments: TaskComment[];
+  attachments: Attachment[];
   activity: TaskActivity[];
   createdAt: string;
   updatedAt: string;
@@ -100,9 +111,18 @@ async function rawById(id: string): Promise<StoredTask | null> {
   const doc = await Task.findOne({ id }).lean();
   if (!doc) return null;
   const task = stripMongo<StoredTask>(doc as Record<string, unknown>);
+  normalizeTask(task);
+  return task;
+}
+
+function normalizeTask(task: StoredTask) {
   if (!Array.isArray(task.assignees)) task.assignees = [];
   if (!Array.isArray(task.subtasks)) task.subtasks = [];
-  return task;
+  if (!Array.isArray(task.attachments)) task.attachments = [];
+  if (!Array.isArray(task.comments)) task.comments = [];
+  for (const c of task.comments) {
+    if (!Array.isArray(c.attachments)) c.attachments = [];
+  }
 }
 
 async function saveTask(task: StoredTask): Promise<void> {
@@ -163,6 +183,22 @@ function toDTO(t: StoredTask): TaskDTO {
   return { ...t, status, progress: deriveProgress(t.assignees), overdue };
 }
 
+function buildAttachment(actor: SessionUser, input: AttachmentInput): Attachment {
+  return {
+    id: crypto.randomUUID(),
+    url: input.url,
+    publicId: input.publicId,
+    resourceType: input.resourceType,
+    format: input.format ?? "",
+    bytes: input.bytes,
+    name: input.name,
+    kind: input.kind,
+    uploadedById: actor.id,
+    uploadedByName: actor.name,
+    createdAt: now(),
+  };
+}
+
 function activity(actor: SessionUser, message: string): TaskActivity {
   return {
     id: crypto.randomUUID(),
@@ -199,8 +235,7 @@ export async function listVisibleTasks(actor: SessionUser): Promise<TaskDTO[]> {
   return docs
     .map((d) => {
       const t = stripMongo<StoredTask>(d as Record<string, unknown>);
-      if (!Array.isArray(t.assignees)) t.assignees = [];
-      if (!Array.isArray(t.subtasks)) t.subtasks = [];
+      normalizeTask(t);
       return t;
     })
     .filter((t) => canSee(t, ids))
@@ -405,12 +440,32 @@ export async function createTask(
     assignees,
     subtasks: [],
     comments: [],
+    attachments: [],
     activity: [activity(actor, `created this task and assigned it to ${names}`)],
     createdAt: ts,
     updatedAt: ts,
   };
 
   await saveTask(task);
+
+  // Notify assignees (best-effort).
+  await Promise.allSettled(
+    assignees
+      .filter((a) => a.id !== actor.id)
+      .map((a) => {
+        const u = allowed.get(a.id);
+        return u
+          ? emailTaskAssigned({
+              to: u.email,
+              assigneeName: a.name,
+              taskTitle: task.title,
+              assignerName: actor.name,
+              taskId: task.id,
+            })
+          : Promise.resolve();
+      })
+  );
+
   return toDTO(task);
 }
 
@@ -434,6 +489,7 @@ export async function updateTask(
   if (input.dueDate !== undefined) {
     task.dueDate = input.dueDate ? new Date(input.dueDate).toISOString() : null;
   }
+  const addedEmails: { to: string; name: string }[] = [];
   if (input.assigneeIds !== undefined) {
     const visible = await listVisibleUsers(actor);
     const allowed = new Map(visible.map((u) => [u.id, u]));
@@ -446,6 +502,7 @@ export async function updateTask(
       const cur = existing.get(cid);
       if (cur) return cur;
       const u = allowed.get(cid)!;
+      if (u.id !== actor.id) addedEmails.push({ to: u.email, name: u.name });
       return newAssignee({ id: u.id, name: u.name, role: u.role });
     });
     task.activity.push(activity(actor, "updated the assignees"));
@@ -453,6 +510,19 @@ export async function updateTask(
 
   task.updatedAt = now();
   await saveTask(task);
+
+  await Promise.allSettled(
+    addedEmails.map((r) =>
+      emailTaskAssigned({
+        to: r.to,
+        assigneeName: r.name,
+        taskTitle: task.title,
+        assignerName: actor.name,
+        taskId: task.id,
+      })
+    )
+  );
+
   return toDTO(task);
 }
 
@@ -472,7 +542,8 @@ export async function addComment(
   actor: SessionUser,
   id: string,
   text: string,
-  parentId?: string | null
+  parentId?: string | null,
+  attachments?: AttachmentInput[]
 ): Promise<TaskDTO> {
   const task = await rawById(id);
   if (!task) throw new AppError("Task not found.", 404);
@@ -482,7 +553,10 @@ export async function addComment(
   }
 
   const clean = cleanHtml(text);
-  if (!clean) throw new AppError("Comment cannot be empty.", 400);
+  const atts = (attachments ?? []).map((a) => buildAttachment(actor, a));
+  if (!clean && atts.length === 0) {
+    throw new AppError("Comment cannot be empty.", 400);
+  }
 
   if (parentId && !task.comments.some((c) => c.id === parentId)) {
     throw new AppError("The comment you replied to no longer exists.", 400);
@@ -495,10 +569,53 @@ export async function addComment(
     text: clean,
     kind: "comment",
     parentId: parentId ?? null,
+    attachments: atts,
     createdAt: now(),
   });
   task.updatedAt = now();
   await saveTask(task);
+  return toDTO(task);
+}
+
+// ── Attachments ────────────────────────────────────────────────────
+export async function addTaskAttachment(
+  actor: SessionUser,
+  id: string,
+  input: AttachmentInput
+): Promise<TaskDTO> {
+  const task = await rawById(id);
+  if (!task) throw new AppError("Task not found.", 404);
+  const ids = await visibleUserIds(actor);
+  if (!canSee(task, ids)) {
+    throw new AppError("You are not allowed to attach files here.", 403);
+  }
+  task.attachments.push(buildAttachment(actor, input));
+  task.activity.push(activity(actor, `attached "${input.name}"`));
+  task.updatedAt = now();
+  await saveTask(task);
+  return toDTO(task);
+}
+
+export async function removeTaskAttachment(
+  actor: SessionUser,
+  id: string,
+  attachmentId: string
+): Promise<TaskDTO> {
+  const task = await rawById(id);
+  if (!task) throw new AppError("Task not found.", 404);
+
+  const att = task.attachments.find((a) => a.id === attachmentId);
+  if (!att) throw new AppError("Attachment not found.", 404);
+
+  // Uploader or a task manager can remove it.
+  if (att.uploadedById !== actor.id && !canEdit(actor, task)) {
+    throw new AppError("You can't remove this attachment.", 403);
+  }
+
+  task.attachments = task.attachments.filter((a) => a.id !== attachmentId);
+  task.updatedAt = now();
+  await saveTask(task);
+  await destroyAsset(att.publicId, att.resourceType);
   return toDTO(task);
 }
 
@@ -642,6 +759,7 @@ export async function transitionTask(
       text: cleanHtml(text),
       kind,
       parentId: null,
+      attachments: [],
       createdAt: now(),
     });
   };
@@ -734,5 +852,35 @@ export async function transitionTask(
 
   task.updatedAt = now();
   await saveTask(task);
+
+  // Notifications (best-effort).
+  try {
+    if (input.action === "submit") {
+      const creator = await store.findById(task.assignerId);
+      if (creator && creator.id !== actor.id) {
+        await emailTaskSubmitted({
+          to: creator.email,
+          creatorName: creator.name,
+          taskTitle: task.title,
+          byName: actor.name,
+          taskId: task.id,
+        });
+      }
+    } else if (input.action === "approve" && input.assigneeId) {
+      const target = await store.findById(input.assigneeId);
+      if (target && target.id !== actor.id) {
+        await emailTaskApproved({
+          to: target.email,
+          assigneeName: target.name,
+          taskTitle: task.title,
+          byName: actor.name,
+          taskId: task.id,
+        });
+      }
+    }
+  } catch (err) {
+    console.error("Task notification failed:", err);
+  }
+
   return toDTO(task);
 }

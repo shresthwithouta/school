@@ -21,6 +21,7 @@ import {
   Plus,
   ListTree,
   UserPlus,
+  Paperclip,
 } from "lucide-react";
 
 import {
@@ -60,6 +61,7 @@ import { TaskDialog } from "@/components/tasks/task-dialog";
 import { UserCombobox, type AssignableUser } from "@/components/tasks/user-combobox";
 import { CommentThread } from "@/components/tasks/comment-thread";
 import { RichText } from "@/components/rich-text";
+import { AttachmentList, AttachmentUploader } from "@/components/attachments";
 import {
   assigneeActions,
   canEditProgress,
@@ -344,6 +346,40 @@ export function TaskPageClient({
               ) : (
                 <p className="text-sm text-muted-foreground">No description.</p>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Attachments */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Paperclip className="size-4" />
+                Attachments
+                {task.attachments.length > 0 && (
+                  <span className="text-sm font-normal text-muted-foreground">
+                    {task.attachments.length}
+                  </span>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <AttachmentList
+                attachments={task.attachments}
+                onRemove={(attId) =>
+                  api(
+                    `/api/tasks/${task.id}/attachments/${attId}`,
+                    "DELETE",
+                    undefined,
+                    "att-del"
+                  )
+                }
+                canRemove={(a) => a.uploadedById === currentUser.id || canEdit}
+              />
+              <AttachmentUploader
+                onAdd={(a) =>
+                  api(`/api/tasks/${task.id}/attachments`, "POST", a, "att-add")
+                }
+              />
             </CardContent>
           </Card>
 

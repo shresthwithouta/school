@@ -17,6 +17,7 @@ const TaskSchema = new Schema(
     // Each subtask: { id, title, assigneeId, assigneeName, expectedDate, status, createdAt, completedAt }
     subtasks: { type: [Mixed], default: [] },
     comments: { type: [Mixed], default: [] },
+    attachments: { type: [Mixed], default: [] },
     activity: { type: [Mixed], default: [] },
     createdAt: { type: String, required: true },
     updatedAt: { type: String, required: true },

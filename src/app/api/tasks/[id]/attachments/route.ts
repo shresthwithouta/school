@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { handleApiError, requireApiUser } from "@/lib/api";
-import { commentSchema } from "@/lib/validation";
-import { addComment } from "@/lib/tasks";
+import { attachmentSchema } from "@/lib/validation";
+import { addTaskAttachment } from "@/lib/tasks";
 
 export async function POST(
   req: Request,
@@ -11,15 +11,9 @@ export async function POST(
   try {
     const actor = await requireApiUser();
     const { id } = await params;
-    const input = commentSchema.parse(await req.json());
-    const task = await addComment(
-      actor,
-      id,
-      input.text ?? "",
-      input.parentId || null,
-      input.attachments
-    );
-    return NextResponse.json({ task });
+    const input = attachmentSchema.parse(await req.json());
+    const task = await addTaskAttachment(actor, id, input);
+    return NextResponse.json({ task }, { status: 201 });
   } catch (err) {
     return handleApiError(err);
   }
