@@ -104,6 +104,7 @@ export const transitionSchema = z.object({
 
 export const commentSchema = z.object({
   text: z.string().min(1, "Comment cannot be empty").max(10000),
+  parentId: z.string().optional().or(z.literal("")),
 });
 
 export const createSubtaskSchema = z.object({

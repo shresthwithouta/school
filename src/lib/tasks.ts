@@ -26,6 +26,7 @@ export type TaskComment = {
   authorName: string;
   text: string;
   kind: "comment" | "feedback" | "note";
+  parentId: string | null;
   createdAt: string;
 };
 
@@ -250,6 +251,129 @@ export async function getTaskStats(actor: SessionUser): Promise<TaskStats> {
   return stats;
 }
 
+// ── Analytics ──────────────────────────────────────────────────────
+export type UserAnalytics = {
+  id: string;
+  name: string;
+  role: string;
+  assigned: number;
+  completed: number;
+  inProgress: number;
+  overdue: number;
+  avgRating: number | null;
+  avgHours: number | null;
+};
+
+export type Analytics = {
+  totalTasks: number;
+  completedTasks: number;
+  inProgressTasks: number;
+  overdueTasks: number;
+  completionRate: number;
+  avgCompletionHours: number | null;
+  perUser: UserAnalytics[];
+};
+
+export async function getTaskAnalytics(actor: SessionUser): Promise<Analytics> {
+  const tasks = await listVisibleTasks(actor);
+
+  type Acc = {
+    name: string;
+    role: string;
+    assigned: number;
+    completed: number;
+    inProgress: number;
+    overdue: number;
+    hoursSum: number;
+    hoursCount: number;
+    ratingSum: number;
+    ratingCount: number;
+  };
+  const map = new Map<string, Acc>();
+
+  for (const t of tasks) {
+    for (const a of t.assignees) {
+      const e: Acc =
+        map.get(a.id) ?? {
+          name: a.name,
+          role: a.role,
+          assigned: 0,
+          completed: 0,
+          inProgress: 0,
+          overdue: 0,
+          hoursSum: 0,
+          hoursCount: 0,
+          ratingSum: 0,
+          ratingCount: 0,
+        };
+      e.assigned += 1;
+      if (a.status === "completed") {
+        e.completed += 1;
+        if (a.completedAt) {
+          const start = a.acceptedAt ?? t.createdAt;
+          const hrs =
+            (new Date(a.completedAt).getTime() - new Date(start).getTime()) /
+            3_600_000;
+          if (hrs >= 0) {
+            e.hoursSum += hrs;
+            e.hoursCount += 1;
+          }
+        }
+        if (a.evaluation) {
+          e.ratingSum += a.evaluation.average;
+          e.ratingCount += 1;
+        }
+      } else {
+        if (a.status !== "assigned") e.inProgress += 1;
+        if (t.overdue) e.overdue += 1;
+      }
+      map.set(a.id, e);
+    }
+  }
+
+  const perUser: UserAnalytics[] = [...map.entries()]
+    .map(([id, e]) => ({
+      id,
+      name: e.name,
+      role: e.role,
+      assigned: e.assigned,
+      completed: e.completed,
+      inProgress: e.inProgress,
+      overdue: e.overdue,
+      avgRating: e.ratingCount
+        ? Math.round((e.ratingSum / e.ratingCount) * 10) / 10
+        : null,
+      avgHours: e.hoursCount
+        ? Math.round((e.hoursSum / e.hoursCount) * 10) / 10
+        : null,
+    }))
+    .sort((a, b) => b.completed - a.completed || b.assigned - a.assigned);
+
+  let hSum = 0;
+  let hCount = 0;
+  for (const e of map.values()) {
+    hSum += e.hoursSum;
+    hCount += e.hoursCount;
+  }
+
+  const completedTasks = tasks.filter((t) => t.status === "completed").length;
+  const inProgressTasks = tasks.filter((t) =>
+    ["accepted", "in_progress", "submitted"].includes(t.status)
+  ).length;
+
+  return {
+    totalTasks: tasks.length,
+    completedTasks,
+    inProgressTasks,
+    overdueTasks: tasks.filter((t) => t.overdue).length,
+    completionRate: tasks.length
+      ? Math.round((completedTasks / tasks.length) * 100)
+      : 0,
+    avgCompletionHours: hCount ? Math.round((hSum / hCount) * 10) / 10 : null,
+    perUser,
+  };
+}
+
 // ── Mutations ──────────────────────────────────────────────────────
 export async function createTask(
   actor: SessionUser,
@@ -347,7 +471,8 @@ export async function deleteTask(
 export async function addComment(
   actor: SessionUser,
   id: string,
-  text: string
+  text: string,
+  parentId?: string | null
 ): Promise<TaskDTO> {
   const task = await rawById(id);
   if (!task) throw new AppError("Task not found.", 404);
@@ -359,12 +484,17 @@ export async function addComment(
   const clean = cleanHtml(text);
   if (!clean) throw new AppError("Comment cannot be empty.", 400);
 
+  if (parentId && !task.comments.some((c) => c.id === parentId)) {
+    throw new AppError("The comment you replied to no longer exists.", 400);
+  }
+
   task.comments.push({
     id: crypto.randomUUID(),
     authorId: actor.id,
     authorName: actor.name,
     text: clean,
     kind: "comment",
+    parentId: parentId ?? null,
     createdAt: now(),
   });
   task.updatedAt = now();
@@ -511,6 +641,7 @@ export async function transitionTask(
       authorName: actor.name,
       text: cleanHtml(text),
       kind,
+      parentId: null,
       createdAt: now(),
     });
   };

@@ -58,14 +58,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge, PriorityBadge, OverdueBadge } from "@/components/tasks/task-badges";
 import { TaskDialog } from "@/components/tasks/task-dialog";
 import { UserCombobox, type AssignableUser } from "@/components/tasks/user-combobox";
-import { RichText, RichTextEditor } from "@/components/rich-text";
+import { CommentThread } from "@/components/tasks/comment-thread";
+import { RichText } from "@/components/rich-text";
 import {
   assigneeActions,
   canEditProgress,
   SUBTASK_STATUSES,
   SUBTASK_STATUS_META,
 } from "@/lib/task-meta";
-import { cn, formatDate, formatDateTime, getInitials, toPlainText } from "@/lib/utils";
+import { cn, formatDate, formatDateTime, getInitials } from "@/lib/utils";
 import type { Assignee, Subtask, TaskDTO } from "@/lib/tasks";
 
 type CurrentUser = { id: string; role: string; tier: string };
@@ -116,7 +117,6 @@ export function TaskPageClient({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
-  const [comment, setComment] = useState("");
   const [progress, setProgress] = useState<number | null>(null);
   const [approveTarget, setApproveTarget] = useState<Assignee | null>(null);
   const [rejectTarget, setRejectTarget] = useState<Assignee | null>(null);
@@ -156,17 +156,6 @@ export function TaskPageClient({
 
   const act = (action: string, payload: Record<string, unknown> = {}, key?: string) =>
     api(`/api/tasks/${task.id}/transition`, "POST", { action, ...payload }, key ?? action);
-
-  async function submitComment() {
-    if (!comment.trim()) return;
-    const ok = await api(
-      `/api/tasks/${task.id}/comments`,
-      "POST",
-      { text: comment },
-      "comment"
-    );
-    if (ok) setComment("");
-  }
 
   async function onDelete() {
     const res = await fetch(`/api/tasks/${task.id}`, { method: "DELETE" });
@@ -429,64 +418,8 @@ export function TaskPageClient({
                 Comments & feedback
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {task.comments.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No comments yet.</p>
-              ) : (
-                <ul className="space-y-3">
-                  {task.comments.map((c) => (
-                    <li key={c.id} className="flex gap-3">
-                      <Avatar className="size-7">
-                        <AvatarFallback className="bg-primary/10 text-xs text-primary">
-                          {getInitials(c.authorName)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div
-                        className={cn(
-                          "flex-1 rounded-lg border p-2.5",
-                          c.kind === "feedback" && "border-amber-500/30 bg-amber-500/5"
-                        )}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-medium">
-                            {c.authorName}
-                            {c.kind === "feedback" && (
-                              <span className="ml-2 text-xs font-normal text-amber-600 dark:text-amber-400">
-                                feedback
-                              </span>
-                            )}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {formatDateTime(c.createdAt)}
-                          </span>
-                        </div>
-                        <RichText html={c.text} className="mt-1 text-muted-foreground" />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="space-y-2">
-                <RichTextEditor
-                  value={comment}
-                  onChange={setComment}
-                  placeholder="Write a comment…"
-                  minHeight="min-h-16"
-                />
-                <div className="flex justify-end">
-                  <Button
-                    onClick={submitComment}
-                    disabled={busy === "comment" || !toPlainText(comment)}
-                  >
-                    {busy === "comment" ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <Send className="size-4" />
-                    )}
-                    Comment
-                  </Button>
-                </div>
-              </div>
+            <CardContent>
+              <CommentThread taskId={task.id} comments={task.comments} />
             </CardContent>
           </Card>
         </div>

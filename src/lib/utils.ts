@@ -18,6 +18,14 @@ export function toPlainText(html?: string | null): string {
     .trim()
 }
 
+/** Human-friendly duration from a number of hours (e.g. 0.5h → "30m", 30h → "1.3d"). */
+export function formatHours(h?: number | null): string {
+  if (h == null) return "—"
+  if (h < 1) return `${Math.round(h * 60)}m`
+  if (h < 24) return `${h}h`
+  return `${(h / 24).toFixed(1)}d`
+}
+
 /** Up to two uppercase initials from a person's name (falls back to "?"). */
 export function getInitials(name?: string | null): string {
   if (!name) return "?"

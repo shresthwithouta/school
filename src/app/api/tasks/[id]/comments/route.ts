@@ -12,7 +12,7 @@ export async function POST(
     const actor = await requireApiUser();
     const { id } = await params;
     const input = commentSchema.parse(await req.json());
-    const task = await addComment(actor, id, input.text);
+    const task = await addComment(actor, id, input.text, input.parentId || null);
     return NextResponse.json({ task });
   } catch (err) {
     return handleApiError(err);
