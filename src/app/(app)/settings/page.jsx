@@ -1,18 +1,17 @@
 import { requireOwner } from "@/lib/session";
 import { PageHeader } from "@/components/page-header";
-import { ComingSoon } from "@/components/coming-soon";
+import { SettingsClient } from "@/components/settings/settings-client";
 
 export const metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
-  await requireOwner();
+  const user = await requireOwner();
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Settings"
-        description="Organisation-wide settings for the platform."
+      <PageHeader title="Settings" description="Appearance and account." />
+      <SettingsClient
+        user={{ name: user.name, email: user.email, role: user.role }}
       />
-      <ComingSoon feature="Settings" />
     </div>
   );
 }
