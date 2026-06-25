@@ -1,8 +1,15 @@
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
 
-const apiKey = process.env.RESEND_API_KEY;
-const FROM =
-  process.env.EMAIL_FROM || "School Workforce <onboarding@resend.dev>";
+const GMAIL_USER = process.env.GMAIL_USER;
+const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
+const enabled = !!(GMAIL_USER && GMAIL_APP_PASSWORD);
+const FROM = enabled ? `School Workforce <${GMAIL_USER}>` : "School Workforce";
+const transporter = enabled
+  ? nodemailer.createTransport({
+      service: "gmail",
+      auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+    })
+  : null;
 
 /** Base URL for links in emails — prefers AUTH_URL, then the Vercel domain. */
 function baseUrl() {
@@ -12,8 +19,6 @@ function baseUrl() {
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return "http://localhost:3000";
 }
-
-const resend = apiKey ? new Resend(apiKey) : null;
 
 function layout(title, body, cta) {
   return `
@@ -31,25 +36,25 @@ function layout(title, body, cta) {
   </div>`;
 }
 
-/** Sends an email. Silently skips (logs) when RESEND_API_KEY isn't set. */
+/** Sends an email via Gmail SMTP. Silently skips (logs) when Gmail isn't set. */
 export async function sendEmail(opts
 
 
 
 ) {
-  if (!resend) {
-    console.log(`[email skipped — no RESEND_API_KEY] "${opts.subject}" -> ${opts.to}`);
+  if (!transporter) {
+    console.log(`[email skipped — Gmail not configured] "${opts.subject}" -> ${opts.to}`);
     return;
   }
   try {
-    await resend.emails.send({
+    await transporter.sendMail({
       from: FROM,
       to: opts.to,
       subject: opts.subject,
       html: opts.html,
     });
   } catch (err) {
-    console.error("Email send failed:", err);
+    console.error("Email send failed:", err?.message || err);
   }
 }
 
