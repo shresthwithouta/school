@@ -130,7 +130,8 @@ export function TaskPageClient({
   const mine = task.assignees.find((a) => a.id === currentUser.id) ?? null;
   const canReview =
     currentUser.id === task.assignerId || currentUser.tier === "OWNER";
-  const canEdit = canReview;
+  // Only the creator can edit/delete the task and manage subtasks/assignees.
+  const canEdit = currentUser.id === task.assignerId;
   const myActions = assigneeActions(mine?.status ?? null);
   const myProgress = progress ?? mine?.progress ?? 0;
 

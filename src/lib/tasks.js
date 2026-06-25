@@ -223,8 +223,9 @@ function canReview(actor, task) {
   return actor.id === task.assignerId || isOwner(actor.role);
 }
 
+// Only the creator (assigner) may edit/delete the task and its subtasks.
 function canEdit(actor, task) {
-  return actor.id === task.assignerId || isOwner(actor.role);
+  return actor.id === task.assignerId;
 }
 
 // ── Queries ────────────────────────────────────────────────────────
