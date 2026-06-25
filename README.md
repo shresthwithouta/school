@@ -4,15 +4,16 @@ A centralized platform to assign, track, review, approve and evaluate tasks acro
 all school stakeholders — Chairman, Principal, Coordinators, Managers, Accountants,
 Teachers and Team Members. Built with a role-based visibility hierarchy.
 
-Built so far: secure authentication, the role hierarchy, dashboards, profiles,
-team management, and a full **Tasks** module (create → assign → accept → execute →
-submit → review → approve/reject) with comments, feedback, an audit trail and
-Timeliness/Quality/Accuracy evaluation. Meetings, events, approvals, reports and
-the AI features are scaffolded as "coming soon".
+Built so far: authentication + role hierarchy, dashboards, team management, profiles
+with photo upload, a full **Tasks** module (multi-assignee lifecycle, subtasks, rich
+text, threaded replies, file/voice attachments, Timeliness/Quality/Accuracy
+evaluation, audit log), **Analytics**, **Meetings** (with attendance + minutes),
+**file/voice uploads** (Cloudinary) and **email notifications** (Resend). Events,
+calendar, approvals and the AI features are still "coming soon".
 
 ## Tech stack
 
-- **Next.js 16** (App Router) + **React 19** + **TypeScript**
+- **Next.js 16** (App Router) + **React 19** + **JavaScript** (JSX)
 - **Tailwind CSS v4** + **shadcn/ui** (radix-nova) — fully responsive, light/dark
 - **NextAuth / Auth.js v5** — Credentials provider, JWT sessions
 - **MongoDB** via **Mongoose** (Atlas or local)
@@ -56,7 +57,7 @@ sign-up** — the Owner creates every other account from **Team management**.
 
 > **Atlas note:** `mongodb+srv://` needs an SRV DNS lookup. If your network's
 > resolver refuses SRV queries, the app routes DNS through public resolvers
-> (8.8.8.8 / 1.1.1.1) automatically — see `src/lib/db.ts`. Also allow your IP in
+> (8.8.8.8 / 1.1.1.1) automatically — see `src/lib/db.js`. Also allow your IP in
 > Atlas → Network Access.
 
 ## Role hierarchy
@@ -75,7 +76,7 @@ Roles keep their real titles from the requirements document. Each role maps to o
 - **Worker** has no management access and sees only their own data.
 
 To re-map a role to a different tier, edit `ROLE_TIERS` in
-[`src/lib/rbac.ts`](src/lib/rbac.ts).
+[`src/lib/rbac.js`](src/lib/rbac.js).
 
 ## Scripts
 
@@ -86,7 +87,6 @@ To re-map a role to a different tier, edit `ROLE_TIERS` in
 | `npm start`         | Run the production build           |
 | `npm run seed`      | Create the Owner bootstrap account |
 | `npm run lint`      | ESLint                             |
-| `npm run typecheck` | TypeScript type check              |
 
 ## Project structure
 
@@ -104,20 +104,20 @@ src/
     app-sidebar, app-header, nav-user, providers, ...
     profile/  users/       # Feature components
   lib/
-    auth.ts  auth.config.ts  # NextAuth (Node) + Edge-safe config
-    db.ts                    # Cached Mongoose connection (+ SRV DNS fix)
-    store.ts                 # User repository (MongoDB)
-    tasks.ts                 # Task data layer + lifecycle state machine
-    task-meta.ts             # Task statuses/priorities/actions (client-safe)
-    demo.ts                  # Seed/demo accounts (client-safe)
-    rbac.ts                  # Roles, tiers, permission helpers
-    users.ts                 # User data layer (visibility enforced)
-    session.ts               # Server-side auth guards
-    validation.ts            # Zod schemas
-  models/User.ts  models/Task.ts   # Mongoose models
+    auth.js  auth.config.js  # NextAuth (Node) + Edge-safe config
+    db.js                    # Cached Mongoose connection (+ SRV DNS fix)
+    store.js                 # User repository (MongoDB)
+    tasks.js                 # Task data layer + lifecycle state machine
+    task-meta.js             # Task statuses/priorities/actions (client-safe)
+    demo.js                  # Seed/demo accounts (client-safe)
+    rbac.js                  # Roles, tiers, permission helpers
+    users.js                 # User data layer (visibility enforced)
+    session.js               # Server-side auth guards
+    validation.js            # Zod schemas
+  models/User.js  models/Task.js   # Mongoose models
   components/tasks/          # Task list, dialog, detail sheet, badges
-  proxy.ts                   # Edge auth gate (Next 16 "proxy")
-scripts/seed.ts              # Seed demo accounts + print logins
+  proxy.js                   # Edge auth gate (Next 16 "proxy")
+scripts/seed.js              # Seed demo accounts + print logins
 ```
 
 ## Security notes
