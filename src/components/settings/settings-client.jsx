@@ -18,7 +18,12 @@ import { cn } from "@/lib/utils";
 export function SettingsClient({ user }) {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  // next-themes: only reflect the active theme after mount to avoid a
+  // hydration mismatch (server doesn't know the client's theme).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
   const current = mounted ? resolvedTheme || theme : "light";
 
   const options = [
