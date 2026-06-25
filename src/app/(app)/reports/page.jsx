@@ -1,27 +1,13 @@
-
-import {
-  ClipboardList,
-  CheckCircle2,
-  TrendingUp,
-  Timer,
-  AlertTriangle,
-  Star,
-} from "lucide-react";
+import Link from "next/link";
+import { ClipboardList, CheckCircle2, AlertTriangle, CircleDashed, TrendingUp, ChevronRight } from "lucide-react";
 
 import { requireManager } from "@/lib/session";
 import { getTaskAnalytics } from "@/lib/tasks";
-import { formatHours, getInitials } from "@/lib/utils";
+import { getInitials } from "@/lib/utils";
 
-import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -39,13 +25,8 @@ export default async function ReportsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Analytics"
-        description="Task throughput and completion performance across your team."
-      />
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Total tasks" value={a.totalTasks} icon={ClipboardList} />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard title="Assigned" value={a.totalAssigned} icon={ClipboardList} accent="sky" />
         <StatCard
           title="Completed"
           value={a.completedTasks}
@@ -53,19 +34,8 @@ export default async function ReportsPage() {
           icon={CheckCircle2}
           accent="emerald"
         />
-        <StatCard
-          title="Avg. time to complete"
-          value={formatHours(a.avgCompletionHours)}
-          hint="From accept to approval"
-          icon={Timer}
-          accent="sky"
-        />
-        <StatCard
-          title="Overdue"
-          value={a.overdueTasks}
-          icon={AlertTriangle}
-          accent="rose"
-        />
+        <StatCard title="Delayed" value={a.delayedTasks} icon={AlertTriangle} accent="rose" />
+        <StatCard title="Not completed" value={a.notCompleted} icon={CircleDashed} accent="amber" />
       </div>
 
       <Card>
@@ -74,9 +44,6 @@ export default async function ReportsPage() {
             <TrendingUp className="size-5" />
             Per-person performance
           </CardTitle>
-          <CardDescription>
-            Who is completing work, how much, and how fast.
-          </CardDescription>
         </CardHeader>
         <CardContent>
           {a.perUser.length === 0 ? (
@@ -91,79 +58,59 @@ export default async function ReportsPage() {
                     <TableHead>Member</TableHead>
                     <TableHead className="text-right">Assigned</TableHead>
                     <TableHead className="text-right">Completed</TableHead>
-                    <TableHead className="text-right">In progress</TableHead>
-                    <TableHead className="text-right">Overdue</TableHead>
-                    <TableHead className="text-right">Avg. time</TableHead>
-                    <TableHead className="text-right">Avg. rating</TableHead>
+                    <TableHead className="text-right">Delayed</TableHead>
+                    <TableHead className="text-right">Not completed</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {a.perUser.map((u) => {
-                    const rate = u.assigned
-                      ? Math.round((u.completed / u.assigned) * 100)
-                      : 0;
-                    return (
-                      <TableRow key={u.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <Avatar className="size-8">
-                              <AvatarFallback className="bg-primary/10 text-xs text-primary">
-                                {getInitials(u.name)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-medium">
-                                {u.name}
-                              </p>
-                              <p className="truncate text-xs text-muted-foreground">
-                                {u.role}
-                              </p>
-                            </div>
+                  {a.perUser.map((u) => (
+                    <TableRow key={u.id}>
+                      <TableCell>
+                        <Link
+                          href={`/reports/${u.id}`}
+                          className="-mx-2 flex items-center gap-3 rounded-md px-2 py-1 transition-colors hover:bg-accent/40"
+                        >
+                          <Avatar className="size-8">
+                            <AvatarFallback className="bg-primary/10 text-xs text-primary">
+                              {getInitials(u.name)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{u.name}</p>
+                            <p className="truncate text-xs text-muted-foreground">{u.role}</p>
                           </div>
-                        </TableCell>
-                        <TableCell className="text-right">{u.assigned}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex flex-col items-end gap-1">
-                            <span>
-                              {u.completed}{" "}
-                              <span className="text-xs text-muted-foreground">
-                                ({rate}%)
-                              </span>
+                          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                        </Link>
+                      </TableCell>
+                      <TableCell className="text-right">{u.assigned}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex flex-col items-end gap-1">
+                          <span>
+                            {u.completed}{" "}
+                            <span className="text-xs text-muted-foreground">
+                              ({u.completionRate}%)
                             </span>
-                            <div className="h-1.5 w-20 overflow-hidden rounded-full bg-muted">
-                              <div
-                                className="h-full rounded-full bg-emerald-500"
-                                style={{ width: `${rate}%` }}
-                              />
-                            </div>
+                          </span>
+                          <div className="h-1.5 w-20 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className="h-full rounded-full bg-emerald-500"
+                              style={{ width: `${u.completionRate}%` }}
+                            />
                           </div>
-                        </TableCell>
-                        <TableCell className="text-right">{u.inProgress}</TableCell>
-                        <TableCell className="text-right">
-                          {u.overdue > 0 ? (
-                            <span className="font-medium text-rose-600 dark:text-rose-400">
-                              {u.overdue}
-                            </span>
-                          ) : (
-                            "0"
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right text-muted-foreground">
-                          {formatHours(u.avgHours)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {u.avgRating != null ? (
-                            <span className="inline-flex items-center gap-1">
-                              <Star className="size-3.5 fill-amber-400 text-amber-400" />
-                              {u.avgRating}
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {u.delayed > 0 ? (
+                          <span className="font-medium text-rose-600 dark:text-rose-400">
+                            {u.delayed}
+                          </span>
+                        ) : (
+                          "0"
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">{u.open}</TableCell>
+                    </TableRow>
+                  ))}
                 </TableBody>
               </Table>
             </div>

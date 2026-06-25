@@ -15,7 +15,9 @@ export const authConfig = {
   pages: {
     signIn: "/login",
   },
-  session: { strategy: "jwt" },
+  // Cap session lifetime to 8 hours (a working day). The jwt callback also
+  // re-syncs role/active status every few minutes for mid-session changes.
+  session: { strategy: "jwt", maxAge: 8 * 60 * 60 },
   callbacks: {
     // Runs in middleware for every matched request.
     authorized({ auth, request: { nextUrl } }) {

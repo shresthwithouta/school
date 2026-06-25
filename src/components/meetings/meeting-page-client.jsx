@@ -14,6 +14,11 @@ import {
   Trash2,
   CheckCircle2,
   Users,
+  ListChecks,
+  CheckSquare,
+  Square,
+  Plus,
+  X,
 } from "lucide-react";
 
 import {
@@ -39,6 +44,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { RichText, RichTextEditor } from "@/components/rich-text";
 import { AttachmentList, AttachmentUploader } from "@/components/attachments";
 import { MeetingDialog } from "@/components/meetings/meeting-dialog";
@@ -62,12 +69,45 @@ export function MeetingPageClient({
   const [atts, setAtts] = useState([]);
   const [endOpen, setEndOpen] = useState(false);
   const [summary, setSummary] = useState("");
+  const [decision, setDecision] = useState("");
+  const [decisionDate, setDecisionDate] = useState("");
 
   const organizer =
     currentUser.id === meeting.createdById || currentUser.tier === "OWNER";
   const me = meeting.attendees.find((a) => a.id === currentUser.id);
   const completed = meeting.status === "completed";
   const canJoin = me && me.status === "invited" && !completed;
+  // Anyone on the invite list (or the organizer) can record decisions.
+  const isParticipant = !!me || organizer;
+
+  async function addDecision() {
+    const text = decision.trim();
+    if (!text) return;
+    const ok = await api(
+      `/api/meetings/${meeting.id}/decisions`,
+      "POST",
+      { text, dueDate: decisionDate },
+      "add-decision"
+    );
+    if (ok) {
+      setDecision("");
+      setDecisionDate("");
+    }
+  }
+  const toggleDecision = (d) =>
+    api(
+      `/api/meetings/${meeting.id}/decisions/${d.id}`,
+      "PATCH",
+      { done: !d.done },
+      `dec-${d.id}`
+    );
+  const removeDecision = (d) =>
+    api(
+      `/api/meetings/${meeting.id}/decisions/${d.id}`,
+      "DELETE",
+      undefined,
+      `del-${d.id}`
+    );
 
   async function api(url, method, body, key = "x") {
     setBusy(key);
@@ -128,16 +168,19 @@ export function MeetingPageClient({
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
-          <Badge
-            variant="outline"
-            className={cn(
-              completed
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                : "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-400"
-            )}
-          >
-            {completed ? "Completed" : "Scheduled"}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-sm text-muted-foreground">{meeting.key}</span>
+            <Badge
+              variant="outline"
+              className={cn(
+                completed
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                  : "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-400"
+              )}
+            >
+              {completed ? "Completed" : "Scheduled"}
+            </Badge>
+          </div>
           <h1 className="text-2xl font-semibold tracking-tight">{meeting.title}</h1>
           <p className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
             <CalendarClock className="size-4" />
@@ -207,6 +250,120 @@ export function MeetingPageClient({
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
+          {/* Final discussion decisions / action points */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ListChecks className="size-4" />
+                Decisions & action points
+                {meeting.decisions.length > 0 && (
+                  <span className="text-sm font-normal text-muted-foreground">
+                    {meeting.decisions.filter((d) => d.done).length}/{meeting.decisions.length} done
+                  </span>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {isParticipant && (
+                <div className="space-y-2 rounded-lg border bg-muted/20 p-2.5">
+                  <Textarea
+                    value={decision}
+                    onChange={(e) => setDecision(e.target.value)}
+                    placeholder="Add one or more points — one per line…"
+                    rows={2}
+                    className="bg-background"
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="text-xs text-muted-foreground">
+                      Target date
+                    </label>
+                    <Input
+                      type="date"
+                      value={decisionDate}
+                      onChange={(e) => setDecisionDate(e.target.value)}
+                      className="h-8 w-auto"
+                    />
+                    <Button
+                      size="sm"
+                      className="ml-auto"
+                      onClick={addDecision}
+                      disabled={busy === "add-decision" || !decision.trim()}
+                    >
+                      {busy === "add-decision" ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Plus className="size-4" />
+                      )}
+                      Add
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {meeting.decisions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No decisions recorded yet.
+                </p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {meeting.decisions.map((d) => {
+                    const overdue = d.overdue;
+                    return (
+                      <li key={d.id} className="flex items-start gap-2 rounded-lg border p-2.5">
+                        <button
+                          type="button"
+                          onClick={() => toggleDecision(d)}
+                          disabled={!isParticipant || !!busy}
+                          className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
+                          title={d.done ? "Mark as not done" : "Mark as done"}
+                        >
+                          {d.done ? (
+                            <CheckSquare className="size-4 text-emerald-500" />
+                          ) : (
+                            <Square className="size-4" />
+                          )}
+                        </button>
+                        <div className="min-w-0 flex-1">
+                          <span
+                            className={cn(
+                              "text-sm",
+                              d.done && "text-muted-foreground line-through"
+                            )}
+                          >
+                            {d.text}
+                          </span>
+                          {d.dueDate && (
+                            <span
+                              className={cn(
+                                "ml-2 inline-flex items-center gap-1 text-xs",
+                                overdue
+                                  ? "font-medium text-rose-600 dark:text-rose-400"
+                                  : "text-muted-foreground"
+                              )}
+                            >
+                              <CalendarClock className="size-3" />
+                              {formatDateTime(d.dueDate).split(",")[0]}
+                            </span>
+                          )}
+                        </div>
+                        {isParticipant && (
+                          <button
+                            type="button"
+                            onClick={() => removeDecision(d)}
+                            disabled={!!busy}
+                            className="shrink-0 text-muted-foreground hover:text-destructive"
+                            title="Remove"
+                          >
+                            <X className="size-4" />
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
           {meeting.description && (
             <Card>
               <CardHeader><CardTitle className="text-base">Agenda</CardTitle></CardHeader>

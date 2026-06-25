@@ -5,9 +5,13 @@ const Mixed = Schema.Types.Mixed;
 const MeetingSchema = new Schema(
   {
     id: { type: String, required: true, unique: true, index: true },
+    key: { type: String, default: "" },
+    seq: { type: Number, default: 0 },
     title: { type: String, required: true },
     description: { type: String, default: "" },
     scheduledAt: { type: String, default: null },
+    // Final discussion bullet points: { id, text, done, created*, done* }
+    decisions: { type: [Mixed], default: [] },
     createdById: { type: String, required: true },
     createdByName: { type: String, default: "" },
     createdByRole: { type: String, default: "" },

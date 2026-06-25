@@ -27,21 +27,21 @@ export function StatCard({
 
 ) {
   return (
-    <Card>
-      <CardContent className="flex items-center gap-4">
+    <Card size="sm">
+      <CardContent className="flex items-center gap-3">
         <div
           className={cn(
-            "flex size-11 shrink-0 items-center justify-center rounded-xl",
+            "flex size-9 shrink-0 items-center justify-center rounded-lg",
             ACCENTS[accent]
           )}
         >
-          <Icon className="size-5" />
+          <Icon className="size-4" />
         </div>
         <div className="min-w-0">
-          <p className="text-sm text-muted-foreground">{title}</p>
-          <p className="text-2xl font-semibold tracking-tight">{value}</p>
+          <p className="truncate text-xs text-muted-foreground">{title}</p>
+          <p className="text-xl leading-tight font-semibold tracking-tight">{value}</p>
           {hint && (
-            <p className="truncate text-xs text-muted-foreground">{hint}</p>
+            <p className="truncate text-[11px] text-muted-foreground">{hint}</p>
           )}
         </div>
       </CardContent>

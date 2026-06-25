@@ -3,18 +3,44 @@ import crypto from "crypto";
 import { connectToDatabase, stripMongo } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { cleanHtml } from "@/lib/sanitize";
-import {
-  emailTaskApproved,
-  emailTaskAssigned,
-  emailTaskSubmitted,
-} from "@/lib/email";
-import { isOwner } from "@/lib/rbac";
+import { emailTaskAssigned, emailTaskCompleted } from "@/lib/email";
+import { canManage, isOwner } from "@/lib/rbac";
 import { store } from "@/lib/store";
-import { listVisibleUsers } from "@/lib/users";
+import { listAssignableTaskUsers } from "@/lib/users";
 import { destroyAsset } from "@/lib/cloudinary";
 
 
 import Task from "@/models/Task";
+
+// ── Jira-style task keys (deterministic — no DB counter) ───────────
+/** Two-letter prefix from the title (uppercased), falling back to "TK". */
+function keyPrefix(title) {
+  const letters = String(title || "").replace(/[^a-zA-Z]/g, "");
+  const p = letters.slice(0, 2).toUpperCase();
+  return p.length === 2 ? p : "TK";
+}
+
+/** Stable number from an id — same task → same number on every request. */
+function keyNum(id) {
+  let h = 5381;
+  for (const ch of String(id)) h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0;
+  return h % 100000;
+}
+
+/**
+ * The public key for a task. Derived deterministically from the id so the list
+ * and the detail route always compute the same value — the route resolves it
+ * by recomputing keys, so it never depends on a stored field or a counter.
+ */
+function taskKey(t) {
+  return t.key || `${keyPrefix(t.title)}-${keyNum(t.id)}`;
+}
+
+const DAY_MS = 86_400_000;
+
+// Version token captured at load time for optimistic concurrency. Stored as a
+// non-enumerable Symbol so it never serializes into the DB doc or a DTO.
+const REV = Symbol("rev");
 
 
 
@@ -106,12 +132,26 @@ import Task from "@/models/Task";
 
 
 // ── Persistence (MongoDB) ──────────────────────────────────────────
-async function rawById(id) {
+// Accepts the internal UUID or the public key. Falls back to recomputing
+// keys across all tasks so a key always resolves even if never persisted.
+async function rawById(idOrKey) {
   await connectToDatabase();
-  const doc = await Task.findOne({ id }).lean();
+  let doc = await Task.findOne({
+    $or: [{ id: idOrKey }, { key: idOrKey }],
+  }).lean();
+  if (!doc) {
+    const all = await Task.find().lean();
+    doc = all.find((d) => taskKey(d) === idOrKey) ?? null;
+  }
   if (!doc) return null;
   const task = stripMongo(doc );
   normalizeTask(task);
+  // Remember the version we read so saveTask can detect concurrent writes.
+  Object.defineProperty(task, REV, {
+    value: task.updatedAt ?? null,
+    writable: true,
+    enumerable: false,
+  });
   return task;
 }
 
@@ -125,9 +165,34 @@ function normalizeTask(task) {
   }
 }
 
+// Optimistic concurrency: an existing task is only overwritten if its
+// `updatedAt` still matches the value we read (REV). If another request changed
+// (or deleted) it in between, the write is rejected with a 409 instead of
+// silently clobbering their change. Brand-new tasks (no REV) are inserted.
 async function saveTask(task) {
   await connectToDatabase();
-  await Task.replaceOne({ id: task.id }, task, { upsert: true });
+  const prev = task[REV];
+  if (prev === undefined) {
+    // Never loaded from the DB → genuinely new document.
+    await Task.replaceOne({ id: task.id }, task, { upsert: true });
+    Object.defineProperty(task, REV, {
+      value: task.updatedAt ?? null,
+      writable: true,
+      enumerable: false,
+    });
+    return;
+  }
+  const res = await Task.replaceOne(
+    { id: task.id, updatedAt: prev },
+    task
+  );
+  if (res.matchedCount === 0) {
+    throw new AppError(
+      "This task was changed by someone else. Refresh and try again.",
+      409
+    );
+  }
+  task[REV] = task.updatedAt ?? null;
 }
 
 function now() {
@@ -140,47 +205,51 @@ function newAssignee(u) {
     name: u.name,
     role: u.role,
     status: "assigned",
-    progress: 0,
-    evaluation: null,
-    acceptedAt: null,
-    submittedAt: null,
     completedAt: null,
   };
 }
 
 // ── Derived task-level values ──────────────────────────────────────
-function deriveStatus(assignees) {
-  if (assignees.length === 0) return "assigned";
-  if (assignees.every((a) => a.status === "completed")) return "completed";
-  if (assignees.some((a) => a.status === "submitted")) return "submitted";
-  if (
-    assignees.some(
-      (a) =>
-        a.status === "accepted" ||
-        a.status === "in_progress" ||
-        a.status === "completed"
-    )
-  )
+// Status precedence: cancelled → draft → completed → delayed → in_progress
+// → assigned. "Delayed" is any open task past its due date.
+function deriveTaskStatus(t) {
+  if (t.cancelled) return "cancelled";
+  const a = t.assignees;
+  if (a.length === 0) return "draft";
+  const allAssigneesDone = a.every((x) => x.status === "completed");
+  // A task isn't finished until its subtasks are done too — open subtasks keep
+  // it active even when every assignee has marked their part complete.
+  const subtasksOpen = (t.subtasks || []).some((s) => s.status !== "done");
+  if (allAssigneesDone && !subtasksOpen) return "completed";
+  if (t.dueDate && new Date(t.dueDate).getTime() < Date.now()) return "delayed";
+  if (allAssigneesDone || a.some((x) => x.status === "in_progress")) {
     return "in_progress";
+  }
   return "assigned";
 }
 
-function deriveProgress(assignees) {
-  if (assignees.length === 0) return 0;
-  const sum = assignees.reduce(
-    (s, a) => s + (a.status === "completed" ? 100 : a.progress),
-    0
-  );
-  return Math.round(sum / assignees.length);
-}
-
 function toDTO(t) {
-  const status = deriveStatus(t.assignees);
-  const overdue =
-    !!t.dueDate &&
-    status !== "completed" &&
-    new Date(t.dueDate).getTime() < Date.now();
-  return { ...t, status, progress: deriveProgress(t.assignees), overdue };
+  const status = deriveTaskStatus(t);
+  const delayed = status === "delayed";
+  const daysLate =
+    delayed && t.dueDate
+      ? Math.max(1, Math.ceil((Date.now() - new Date(t.dueDate).getTime()) / DAY_MS))
+      : 0;
+  const subtasks = (t.subtasks || []).map((s, i) => ({
+    ...s,
+    key: s.key || `SB-${i + 1}`,
+  }));
+  return {
+    ...t,
+    subtasks,
+    key: taskKey(t),
+    status,
+    isDraft: status === "draft",
+    cancelled: !!t.cancelled,
+    delayed,
+    overdue: delayed, // alias kept for older callers
+    daysLate,
+  };
 }
 
 function buildAttachment(actor, input) {
@@ -199,6 +268,19 @@ function buildAttachment(actor, input) {
   };
 }
 
+// Next subtask key number — monotonic per task, never reused. Derived from a
+// stored counter (subSeq) and the highest existing key so old tasks migrate
+// safely. This keeps SB-keys (and the URLs built from them) stable when a
+// subtask in the middle is deleted.
+function nextSubKeyNum(task) {
+  let max = task.subSeq ?? 0;
+  for (const s of task.subtasks || []) {
+    const n = parseInt(String(s.key || "").replace(/^SB-/, ""), 10);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return max + 1;
+}
+
 function activity(actor, message) {
   return {
     id: crypto.randomUUID(),
@@ -210,17 +292,21 @@ function activity(actor, message) {
 }
 
 // ── Visibility & permissions ───────────────────────────────────────
-async function visibleUserIds(actor) {
-  const users = await listVisibleUsers(actor);
-  return new Set(users.map((u) => u.id));
+// Chairman/Director, Principal and Manager (the management tiers) can see
+// every task across the school. Everyone else sees only tasks they created
+// or are assigned to.
+function canSeeTask(actor, task) {
+  if (canManage(actor.role)) return true;
+  return (
+    task.assignerId === actor.id ||
+    task.assignees.some((a) => a.id === actor.id)
+  );
 }
 
-function canSee(task, ids) {
-  return ids.has(task.assignerId) || task.assignees.some((a) => ids.has(a.id));
-}
-
-function canReview(actor, task) {
-  return actor.id === task.assignerId || isOwner(actor.role);
+// The creator or any management tier (Chairman/Principal/Manager) can
+// cancel / reopen a task.
+function canControlTask(actor, task) {
+  return actor.id === task.assignerId || canManage(actor.role);
 }
 
 // Only the creator (assigner) may edit/delete the task and its subtasks.
@@ -230,7 +316,6 @@ function canEdit(actor, task) {
 
 // ── Queries ────────────────────────────────────────────────────────
 export async function listVisibleTasks(actor) {
-  const ids = await visibleUserIds(actor);
   await connectToDatabase();
   const docs = await Task.find().lean();
   return docs
@@ -239,7 +324,7 @@ export async function listVisibleTasks(actor) {
       normalizeTask(t);
       return t;
     })
-    .filter((t) => canSee(t, ids))
+    .filter((t) => canSeeTask(actor, t))
     .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
     .map(toDTO);
 }
@@ -250,8 +335,7 @@ export async function getTaskForActor(
 ) {
   const task = await rawById(id);
   if (!task) return null;
-  const ids = await visibleUserIds(actor);
-  if (!canSee(task, ids)) return null;
+  if (!canSeeTask(actor, task)) return null;
   return toDTO(task);
 }
 
@@ -269,19 +353,21 @@ export async function getTaskStats(actor) {
   const tasks = await listVisibleTasks(actor);
   const stats = {
     total: tasks.length,
+    draft: 0,
     pending: 0,
     inProgress: 0,
-    inReview: 0,
+    delayed: 0,
     completed: 0,
-    overdue: 0,
+    cancelled: 0,
     assignedToMe: 0,
   };
   for (const t of tasks) {
-    if (t.status === "assigned") stats.pending += 1;
+    if (t.status === "draft") stats.draft += 1;
+    else if (t.status === "assigned") stats.pending += 1;
     else if (t.status === "in_progress") stats.inProgress += 1;
-    else if (t.status === "submitted") stats.inReview += 1;
+    else if (t.status === "delayed") stats.delayed += 1;
     else if (t.status === "completed") stats.completed += 1;
-    if (t.overdue) stats.overdue += 1;
+    else if (t.status === "cancelled") stats.cancelled += 1;
     if (t.assignees.some((a) => a.id === actor.id)) stats.assignedToMe += 1;
   }
   return stats;
@@ -325,43 +411,27 @@ export async function getTaskAnalytics(actor) {
 
 
 
+  // Per-person breakdown. Owners are excluded — they don't carry tasks.
   const map = new Map();
-
   for (const t of tasks) {
+    if (t.status === "draft" || t.status === "cancelled") continue;
     for (const a of t.assignees) {
+      if (isOwner(a.role)) continue;
       const e =
         map.get(a.id) ?? {
           name: a.name,
           role: a.role,
           assigned: 0,
           completed: 0,
-          inProgress: 0,
-          overdue: 0,
-          hoursSum: 0,
-          hoursCount: 0,
-          ratingSum: 0,
-          ratingCount: 0,
+          delayed: 0,
+          open: 0,
         };
       e.assigned += 1;
       if (a.status === "completed") {
         e.completed += 1;
-        if (a.completedAt) {
-          const start = a.acceptedAt ?? t.createdAt;
-          const hrs =
-            (new Date(a.completedAt).getTime() - new Date(start).getTime()) /
-            3_600_000;
-          if (hrs >= 0) {
-            e.hoursSum += hrs;
-            e.hoursCount += 1;
-          }
-        }
-        if (a.evaluation) {
-          e.ratingSum += a.evaluation.average;
-          e.ratingCount += 1;
-        }
       } else {
-        if (a.status !== "assigned") e.inProgress += 1;
-        if (t.overdue) e.overdue += 1;
+        e.open += 1;
+        if (t.delayed) e.delayed += 1;
       }
       map.set(a.id, e);
     }
@@ -370,42 +440,26 @@ export async function getTaskAnalytics(actor) {
   const perUser = [...map.entries()]
     .map(([id, e]) => ({
       id,
-      name: e.name,
-      role: e.role,
-      assigned: e.assigned,
-      completed: e.completed,
-      inProgress: e.inProgress,
-      overdue: e.overdue,
-      avgRating: e.ratingCount
-        ? Math.round((e.ratingSum / e.ratingCount) * 10) / 10
-        : null,
-      avgHours: e.hoursCount
-        ? Math.round((e.hoursSum / e.hoursCount) * 10) / 10
-        : null,
+      ...e,
+      completionRate: e.assigned ? Math.round((e.completed / e.assigned) * 100) : 0,
     }))
     .sort((a, b) => b.completed - a.completed || b.assigned - a.assigned);
 
-  let hSum = 0;
-  let hCount = 0;
-  for (const e of map.values()) {
-    hSum += e.hoursSum;
-    hCount += e.hoursCount;
-  }
-
-  const completedTasks = tasks.filter((t) => t.status === "completed").length;
-  const inProgressTasks = tasks.filter((t) =>
-    ["accepted", "in_progress", "submitted"].includes(t.status)
-  ).length;
+  // Org totals over real (assigned, non-draft, non-cancelled) tasks.
+  const active = tasks.filter(
+    (t) => t.status !== "draft" && t.status !== "cancelled"
+  );
+  const completedTasks = active.filter((t) => t.status === "completed").length;
+  const delayedTasks = active.filter((t) => t.status === "delayed").length;
 
   return {
-    totalTasks: tasks.length,
+    totalAssigned: active.length,
     completedTasks,
-    inProgressTasks,
-    overdueTasks: tasks.filter((t) => t.overdue).length,
-    completionRate: tasks.length
-      ? Math.round((completedTasks / tasks.length) * 100)
+    delayedTasks,
+    notCompleted: active.length - completedTasks,
+    completionRate: active.length
+      ? Math.round((completedTasks / active.length) * 100)
       : 0,
-    avgCompletionHours: hCount ? Math.round((hSum / hCount) * 10) / 10 : null,
     perUser,
   };
 }
@@ -415,12 +469,10 @@ export async function createTask(
   actor,
   input
 ) {
-  const visible = await listVisibleUsers(actor);
-  const allowed = new Map(visible.map((u) => [u.id, u]));
-  const chosen = input.assigneeIds.filter((id) => allowed.has(id));
-  if (chosen.length === 0) {
-    throw new AppError("You can only assign people at or below your level.", 403);
-  }
+  const assignable = await listAssignableTaskUsers(actor);
+  const allowed = new Map(assignable.map((u) => [u.id, u]));
+  // Empty assignees is allowed — the task is saved as a draft.
+  const chosen = (input.assigneeIds ?? []).filter((id) => allowed.has(id));
 
   const assignees = chosen.map((id) => {
     const u = allowed.get(id);
@@ -428,13 +480,18 @@ export async function createTask(
   });
 
   const ts = now();
+  const title = input.title.trim();
+  const id = crypto.randomUUID();
   const names = assignees.map((a) => a.name).join(", ");
   const task = {
-    id: crypto.randomUUID(),
-    title: input.title.trim(),
+    id,
+    key: `${keyPrefix(title)}-${keyNum(id)}`,
+    title,
     description: cleanHtml(input.description),
     priority: input.priority,
     dueDate: input.dueDate ? new Date(input.dueDate).toISOString() : null,
+    cancelled: false,
+    cancelledAt: null,
     assignerId: actor.id,
     assignerName: actor.name,
     assignerRole: actor.role,
@@ -442,7 +499,14 @@ export async function createTask(
     subtasks: [],
     comments: [],
     attachments: [],
-    activity: [activity(actor, `created this task and assigned it to ${names}`)],
+    activity: [
+      activity(
+        actor,
+        assignees.length
+          ? `created this task and assigned it to ${names}`
+          : "created this task as a draft"
+      ),
+    ],
     createdAt: ts,
     updatedAt: ts,
   };
@@ -480,8 +544,8 @@ export async function updateTask(
   if (!canEdit(actor, task)) {
     throw new AppError("You are not allowed to edit this task.", 403);
   }
-  if (deriveStatus(task.assignees) === "completed") {
-    throw new AppError("Completed tasks cannot be edited.", 400);
+  if (deriveTaskStatus(task) === "completed") {
+    throw new AppError("Completed tasks cannot be edited. Reopen it first.", 400);
   }
 
   if (input.title !== undefined) task.title = input.title.trim();
@@ -492,12 +556,10 @@ export async function updateTask(
   }
   const addedEmails = [];
   if (input.assigneeIds !== undefined) {
-    const visible = await listVisibleUsers(actor);
-    const allowed = new Map(visible.map((u) => [u.id, u]));
+    const assignable = await listAssignableTaskUsers(actor);
+    const allowed = new Map(assignable.map((u) => [u.id, u]));
+    // Empty list is allowed — the task drops back to a draft.
     const chosen = input.assigneeIds.filter((x) => allowed.has(x));
-    if (chosen.length === 0) {
-      throw new AppError("You can only assign people at or below your level.", 403);
-    }
     const existing = new Map(task.assignees.map((a) => [a.id, a]));
     task.assignees = chosen.map((cid) => {
       const cur = existing.get(cid);
@@ -506,7 +568,12 @@ export async function updateTask(
       if (u.id !== actor.id) addedEmails.push({ to: u.email, name: u.name });
       return newAssignee({ id: u.id, name: u.name, role: u.role });
     });
-    task.activity.push(activity(actor, "updated the assignees"));
+    task.activity.push(
+      activity(
+        actor,
+        chosen.length ? "updated the assignees" : "moved this task back to a draft"
+      )
+    );
   }
 
   task.updatedAt = now();
@@ -548,8 +615,7 @@ export async function addComment(
 ) {
   const task = await rawById(id);
   if (!task) throw new AppError("Task not found.", 404);
-  const ids = await visibleUserIds(actor);
-  if (!canSee(task, ids)) {
+  if (!canSeeTask(actor, task)) {
     throw new AppError("You are not allowed to comment on this task.", 403);
   }
 
@@ -586,8 +652,7 @@ export async function addTaskAttachment(
 ) {
   const task = await rawById(id);
   if (!task) throw new AppError("Task not found.", 404);
-  const ids = await visibleUserIds(actor);
-  if (!canSee(task, ids)) {
+  if (!canSeeTask(actor, task)) {
     throw new AppError("You are not allowed to attach files here.", 403);
   }
   task.attachments.push(buildAttachment(actor, input));
@@ -635,15 +700,18 @@ export async function addSubtask(
   let assigneeId = null;
   let assigneeName = "";
   if (input.assigneeId) {
-    const visible = await listVisibleUsers(actor);
-    const u = visible.find((x) => x.id === input.assigneeId);
+    const assignable = await listAssignableTaskUsers(actor);
+    const u = assignable.find((x) => x.id === input.assigneeId);
     if (!u) throw new AppError("You cannot assign to that person.", 403);
     assigneeId = u.id;
     assigneeName = u.name;
   }
 
+  const seq = nextSubKeyNum(task);
+  task.subSeq = seq;
   const sub = {
     id: crypto.randomUUID(),
+    key: `SB-${seq}`,
     title: input.title.trim(),
     assigneeId,
     assigneeName,
@@ -707,8 +775,8 @@ export async function updateSubtask(
         sub.assigneeId = null;
         sub.assigneeName = "";
       } else {
-        const visible = await listVisibleUsers(actor);
-        const u = visible.find((x) => x.id === input.assigneeId);
+        const assignable = await listAssignableTaskUsers(actor);
+        const u = assignable.find((x) => x.id === input.assigneeId);
         if (!u) throw new AppError("You cannot assign to that person.", 403);
         sub.assigneeId = u.id;
         sub.assigneeName = u.name;
@@ -744,13 +812,12 @@ export async function transitionTask(
 ) {
   const task = await rawById(id);
   if (!task) throw new AppError("Task not found.", 404);
-  const ids = await visibleUserIds(actor);
-  if (!canSee(task, ids)) {
+  if (!canSeeTask(actor, task)) {
     throw new AppError("You are not allowed to act on this task.", 403);
   }
 
   const mine = task.assignees.find((a) => a.id === actor.id);
-  const reviewer = canReview(actor, task);
+  const wasCompleted = deriveTaskStatus(task) === "completed";
 
   const pushComment = (text, kind) => {
     task.comments.push({
@@ -766,85 +833,59 @@ export async function transitionTask(
   };
 
   switch (input.action) {
-    case "accept": {
-      if (!mine || mine.status !== "assigned") {
-        throw new AppError("You cannot accept this task right now.", 400);
-      }
-      mine.status = "accepted";
-      mine.acceptedAt = now();
-      task.activity.push(activity(actor, "accepted the task"));
-      break;
-    }
     case "start": {
-      if (!mine || !["accepted", "in_progress"].includes(mine.status)) {
+      if (!mine || mine.status === "completed") {
         throw new AppError("You cannot start this task right now.", 400);
       }
       mine.status = "in_progress";
       task.activity.push(activity(actor, "started work"));
       break;
     }
-    case "progress": {
-      if (!mine || !["accepted", "in_progress"].includes(mine.status)) {
-        throw new AppError("You cannot update progress right now.", 400);
+    case "complete": {
+      if (!mine || mine.status === "completed") {
+        throw new AppError("You cannot complete this task right now.", 400);
       }
-      mine.status = "in_progress";
-      mine.progress = input.progress ?? mine.progress;
-      task.activity.push(activity(actor, `updated progress to ${mine.progress}%`));
-      break;
-    }
-    case "submit": {
-      if (!mine || !["accepted", "in_progress"].includes(mine.status)) {
-        throw new AppError("You cannot submit this task right now.", 400);
-      }
-      mine.status = "submitted";
-      mine.progress = 100;
-      mine.submittedAt = now();
+      mine.status = "completed";
+      mine.completedAt = now();
       if (input.note) pushComment(input.note, "note");
-      task.activity.push(activity(actor, "submitted their work for review"));
+      task.activity.push(activity(actor, "marked their part complete"));
       break;
     }
-    case "approve": {
-      if (!reviewer) throw new AppError("You cannot review this task.", 403);
-      const target = task.assignees.find((a) => a.id === input.assigneeId);
-      if (!target || target.status !== "submitted") {
-        throw new AppError("That submission cannot be approved right now.", 400);
+    case "cancel": {
+      if (!canControlTask(actor, task)) {
+        throw new AppError("You cannot cancel this task.", 403);
       }
-      if (!input.evaluation) {
-        throw new AppError("An evaluation is required to approve.", 400);
-      }
-      const { timeliness, quality, accuracy } = input.evaluation;
-      target.evaluation = {
-        timeliness,
-        quality,
-        accuracy,
-        average: Math.round(((timeliness + quality + accuracy) / 3) * 10) / 10,
-        ratedById: actor.id,
-        ratedByName: actor.name,
-        ratedAt: now(),
-      };
-      target.status = "completed";
-      target.completedAt = now();
-      if (input.note) pushComment(`To ${target.name}: ${input.note}`, "feedback");
-      task.activity.push(
-        activity(
-          actor,
-          `approved ${target.name}'s work (avg ${target.evaluation.average}/5)`
-        )
-      );
+      if (task.cancelled) throw new AppError("This task is already cancelled.", 400);
+      task.cancelled = true;
+      task.cancelledAt = now();
+      if (input.note) pushComment(input.note, "note");
+      task.activity.push(activity(actor, "cancelled the task"));
       break;
     }
-    case "reject": {
-      if (!reviewer) throw new AppError("You cannot review this task.", 403);
-      const target = task.assignees.find((a) => a.id === input.assigneeId);
-      if (!target || target.status !== "submitted") {
-        throw new AppError("That submission cannot be returned right now.", 400);
+    case "reopen": {
+      if (!canControlTask(actor, task)) {
+        throw new AppError("You cannot reopen this task.", 403);
       }
-      if (!input.feedback) {
-        throw new AppError("Please add feedback explaining what to change.", 400);
+      if (task.cancelled) {
+        // Un-cancel only — restore the task exactly as it was, preserving each
+        // assignee's status and completion history (don't reset anyone).
+        task.cancelled = false;
+        task.cancelledAt = null;
+        task.activity.push(activity(actor, "reopened the cancelled task"));
+      } else if (
+        task.assignees.length > 0 &&
+        task.assignees.every((a) => a.status === "completed")
+      ) {
+        // Reopening a finished task: there's no per-person open part left, so
+        // bring everyone back to in-progress to make it active again.
+        for (const a of task.assignees) {
+          a.status = "in_progress";
+          a.completedAt = null;
+        }
+        task.activity.push(activity(actor, "reopened the task for more work"));
+      } else {
+        throw new AppError("This task is already open.", 400);
       }
-      target.status = "in_progress";
-      pushComment(`To ${target.name}: ${input.feedback}`, "feedback");
-      task.activity.push(activity(actor, `requested changes from ${target.name}`));
       break;
     }
     default:
@@ -854,12 +895,13 @@ export async function transitionTask(
   task.updatedAt = now();
   await saveTask(task);
 
-  // Notifications (best-effort).
-  try {
-    if (input.action === "submit") {
+  // Notify the creator when the whole task becomes completed (best-effort).
+  const nowCompleted = deriveTaskStatus(task) === "completed";
+  if (!wasCompleted && nowCompleted) {
+    try {
       const creator = await store.findById(task.assignerId);
       if (creator && creator.id !== actor.id) {
-        await emailTaskSubmitted({
+        await emailTaskCompleted({
           to: creator.email,
           creatorName: creator.name,
           taskTitle: task.title,
@@ -867,20 +909,9 @@ export async function transitionTask(
           taskId: task.id,
         });
       }
-    } else if (input.action === "approve" && input.assigneeId) {
-      const target = await store.findById(input.assigneeId);
-      if (target && target.id !== actor.id) {
-        await emailTaskApproved({
-          to: target.email,
-          assigneeName: target.name,
-          taskTitle: task.title,
-          byName: actor.name,
-          taskId: task.id,
-        });
-      }
+    } catch (err) {
+      console.error("Task notification failed:", err);
     }
-  } catch (err) {
-    console.error("Task notification failed:", err);
   }
 
   return toDTO(task);

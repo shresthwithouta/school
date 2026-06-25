@@ -94,13 +94,13 @@ export async function emailTaskAssigned(args
     subject: `You've been assigned: ${args.taskTitle}`,
     html: layout(
       "You've been added to a task",
-      `Hi ${args.assigneeName}, <strong>${args.assignerName}</strong> assigned you to the task <strong>${args.taskTitle}</strong>. Please review and accept it.`,
+      `Hi ${args.assigneeName}, <strong>${args.assignerName}</strong> assigned you to the task <strong>${args.taskTitle}</strong>. Open it to get started.`,
       { label: "Open task", href: taskUrl(args.taskId) }
     ),
   });
 }
 
-export async function emailTaskSubmitted(args
+export async function emailTaskCompleted(args
 
 
 
@@ -109,28 +109,10 @@ export async function emailTaskSubmitted(args
 ) {
   await sendEmail({
     to: args.to,
-    subject: `Ready for review: ${args.taskTitle}`,
+    subject: `Completed: ${args.taskTitle}`,
     html: layout(
-      "A task was submitted for review",
-      `Hi ${args.creatorName}, <strong>${args.byName}</strong> submitted their work on <strong>${args.taskTitle}</strong>. It's waiting for your review and approval.`,
-      { label: "Review task", href: taskUrl(args.taskId) }
-    ),
-  });
-}
-
-export async function emailTaskApproved(args
-
-
-
-
-
-) {
-  await sendEmail({
-    to: args.to,
-    subject: `Approved: ${args.taskTitle}`,
-    html: layout(
-      "Your work was approved 🎉",
-      `Hi ${args.assigneeName}, <strong>${args.byName}</strong> approved your work on <strong>${args.taskTitle}</strong>. Nice job!`,
+      "A task was completed ✅",
+      `Hi ${args.creatorName}, <strong>${args.byName}</strong> completed the task <strong>${args.taskTitle}</strong>.`,
       { label: "View task", href: taskUrl(args.taskId) }
     ),
   });

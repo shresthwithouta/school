@@ -103,6 +103,7 @@ export function UserDialog({
             department: values.department,
             phone: values.phone,
             isActive: values.isActive,
+            ...(values.password ? { password: values.password } : {}),
           };
 
     const res = await fetch(url, {
@@ -221,21 +222,42 @@ export function UserDialog({
           </div>
 
           {mode === "edit" && (
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div className="space-y-0.5">
-                <Label htmlFor="isActive">Active account</Label>
-                <p className="text-xs text-muted-foreground">
-                  Inactive members cannot sign in.
-                </p>
+            <>
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div className="space-y-0.5">
+                  <Label htmlFor="isActive">Active account</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Inactive members cannot sign in.
+                  </p>
+                </div>
+                <Switch
+                  id="isActive"
+                  checked={isActive}
+                  onCheckedChange={(v) =>
+                    setValue("isActive", v, { shouldDirty: true })
+                  }
+                />
               </div>
-              <Switch
-                id="isActive"
-                checked={isActive}
-                onCheckedChange={(v) =>
-                  setValue("isActive", v, { shouldDirty: true })
-                }
-              />
-            </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="password">Set new password</Label>
+                <Input
+                  id="password"
+                  type="text"
+                  placeholder="Leave blank to keep current"
+                  {...register("password")}
+                  aria-invalid={!!errors.password}
+                />
+                {errors.password ? (
+                  <p className="text-sm text-destructive">{errors.password.message}</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Shown so you can share it. The member is asked to change it on
+                    next sign-in.
+                  </p>
+                )}
+              </div>
+            </>
           )}
 
           <DialogFooter>

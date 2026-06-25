@@ -9,6 +9,22 @@ import { listVisibleUsers } from "@/lib/users";
 import { destroyAsset } from "@/lib/cloudinary";
 import Meeting from "@/models/Meeting";
 
+// ── Jira-style meeting keys (deterministic — no DB counter) ────────
+/** Stable number from an id — same meeting → same key on every request. */
+function keyNum(id) {
+  let h = 5381;
+  for (const ch of String(id)) h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0;
+  return h % 100000;
+}
+
+function meetingKey(m) {
+  return m.key || `ME-${keyNum(m.id)}`;
+}
+
+// Version token captured at load time for optimistic concurrency. Non-enumerable
+// Symbol so it never serializes into the DB doc or a DTO.
+const REV = Symbol("rev");
+
 
 
 
@@ -63,6 +79,7 @@ function now() {
 function normalize(m) {
   if (!Array.isArray(m.attendees)) m.attendees = [];
   if (!Array.isArray(m.messages)) m.messages = [];
+  if (!Array.isArray(m.decisions)) m.decisions = [];
   for (const msg of m.messages) {
     if (!Array.isArray(msg.attachments)) msg.attachments = [];
   }
@@ -70,26 +87,75 @@ function normalize(m) {
 
 function toDTO(m) {
   const joinedCount = m.attendees.filter((a) => a.status === "joined").length;
+  const nowMs = Date.now();
+  const decisions = (m.decisions || []).map((d) => ({
+    ...d,
+    overdue: !d.done && !!d.dueDate && new Date(d.dueDate).getTime() < nowMs,
+  }));
   return {
     ...m,
+    decisions,
+    key: meetingKey(m),
     joinedCount,
     invitedCount: m.attendees.length,
     isFull: m.maxAttendees ? joinedCount >= m.maxAttendees : false,
   };
 }
 
-async function rawById(id) {
+// Accepts the internal UUID or the public key. Falls back to recomputing
+// keys across all meetings so a key always resolves.
+async function rawById(idOrKey) {
   await connectToDatabase();
-  const doc = await Meeting.findOne({ id }).lean();
+  let doc = await Meeting.findOne({
+    $or: [{ id: idOrKey }, { key: idOrKey }],
+  }).lean();
+  if (!doc) {
+    const all = await Meeting.find().lean();
+    doc = all.find((d) => meetingKey(d) === idOrKey) ?? null;
+  }
   if (!doc) return null;
   const m = stripMongo(doc );
   normalize(m);
+  Object.defineProperty(m, REV, {
+    value: m.updatedAt ?? null,
+    writable: true,
+    enumerable: false,
+  });
   return m;
 }
 
+// Who may add/tick the final discussion points: anyone on the invite list,
+// the organizer, or an owner.
+function isParticipant(actor, m) {
+  return (
+    actor.id === m.createdById ||
+    isOwner(actor.role) ||
+    m.attendees.some((a) => a.id === actor.id)
+  );
+}
+
+// Optimistic concurrency — see saveTask in tasks.js. Prevents concurrent joins,
+// messages and decision ticks from clobbering each other (last-write-wins).
 async function save(m) {
   await connectToDatabase();
-  await Meeting.replaceOne({ id: m.id }, m, { upsert: true });
+  const prev = m[REV];
+  if (prev === undefined) {
+    await Meeting.replaceOne({ id: m.id }, m, { upsert: true });
+    Object.defineProperty(m, REV, {
+      value: m.updatedAt ?? null,
+      writable: true,
+      enumerable: false,
+    });
+    return;
+  }
+  const res = await Meeting.replaceOne({ id: m.id, updatedAt: prev }, m);
+  if (res.matchedCount === 0) {
+    throw new AppError(
+      "This meeting was changed by someone else. Refresh and try again.",
+      409
+    );
+  }
+  m[REV] = m.updatedAt ?? null;
 }
 
 function buildAttachment(actor, input) {
@@ -129,19 +195,47 @@ export async function listVisibleMeetings(
   const ids = await visibleUserIds(actor);
   await connectToDatabase();
   const docs = await Meeting.find().lean();
-  return docs
+  const meetings = docs
     .map((d) => {
       const m = stripMongo(d );
       normalize(m);
       return m;
     })
-    .filter((m) => canSee(m, ids))
+    .filter((m) => canSee(m, ids));
+
+  return meetings
     .sort((a, b) => {
       const ax = a.scheduledAt ?? a.createdAt;
       const bx = b.scheduledAt ?? b.createdAt;
       return ax < bx ? 1 : -1;
     })
     .map(toDTO);
+}
+
+/**
+ * Open (un-ticked) discussion decisions across meetings the actor is part of —
+ * surfaced on their dashboard until someone ticks them off.
+ */
+export async function listPendingDecisions(actor) {
+  const meetings = await listVisibleMeetings(actor);
+  const out = [];
+  for (const m of meetings) {
+    if (!m.attendees.some((a) => a.id === actor.id)) continue;
+    for (const d of m.decisions ?? []) {
+      if (!d.done) {
+        out.push({
+          meetingId: m.id,
+          meetingKey: m.key,
+          meetingTitle: m.title,
+          decisionId: d.id,
+          text: d.text,
+          dueDate: d.dueDate ?? null,
+          overdue: !!d.overdue,
+        });
+      }
+    }
+  }
+  return out;
 }
 
 export async function getMeetingForActor(
@@ -174,8 +268,10 @@ export async function createMeeting(
     return { id: u.id, name: u.name, role: u.role, status: "invited", joinedAt: null };
   });
 
+  const meetingId = crypto.randomUUID();
   const meeting = {
-    id: crypto.randomUUID(),
+    id: meetingId,
+    key: `ME-${keyNum(meetingId)}`,
     title: input.title.trim(),
     description: cleanHtml(input.description),
     scheduledAt: input.scheduledAt ? new Date(input.scheduledAt).toISOString() : null,
@@ -184,6 +280,7 @@ export async function createMeeting(
     createdByRole: actor.role,
     attendees,
     messages: [],
+    decisions: [],
     status: "scheduled",
     summary: "",
     maxAttendees: input.maxAttendees && input.maxAttendees > 0 ? input.maxAttendees : null,
@@ -308,9 +405,10 @@ export async function addMeetingMessage(
 ) {
   const m = await rawById(id);
   if (!m) throw new AppError("Meeting not found.", 404);
-  const ids = await visibleUserIds(actor);
-  if (!canSee(m, ids)) {
-    throw new AppError("You can't post in this meeting.", 403);
+  // Only the organizer, an owner, or an invited attendee may post — being able
+  // to merely *see* the meeting isn't enough.
+  if (!isParticipant(actor, m)) {
+    throw new AppError("Only people in this meeting can post messages.", 403);
   }
 
   const clean = cleanHtml(text);
@@ -344,6 +442,72 @@ export async function endMeeting(
   }
   m.status = "completed";
   m.summary = cleanHtml(summary);
+  m.updatedAt = now();
+  await save(m);
+  return toDTO(m);
+}
+
+// ── Final discussion decisions (bullet points) ─────────────────────
+// Accepts one OR many points (one per line) and an optional target date.
+export async function addDecision(actor, id, text, dueDate) {
+  const m = await rawById(id);
+  if (!m) throw new AppError("Meeting not found.", 404);
+  if (!isParticipant(actor, m)) {
+    throw new AppError("Only people in this meeting can add decisions.", 403);
+  }
+  const lines = String(text ?? "")
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 50);
+  if (lines.length === 0) throw new AppError("Decision cannot be empty.", 400);
+
+  const due = dueDate ? new Date(dueDate).toISOString() : null;
+  const ts = now();
+  for (const line of lines) {
+    m.decisions.push({
+      id: crypto.randomUUID(),
+      text: line.slice(0, 500),
+      dueDate: due,
+      done: false,
+      createdById: actor.id,
+      createdByName: actor.name,
+      createdAt: ts,
+      doneById: null,
+      doneByName: null,
+      doneAt: null,
+    });
+  }
+  m.updatedAt = now();
+  await save(m);
+  return toDTO(m);
+}
+
+export async function setDecisionDone(actor, id, decisionId, done) {
+  const m = await rawById(id);
+  if (!m) throw new AppError("Meeting not found.", 404);
+  if (!isParticipant(actor, m)) {
+    throw new AppError("Only people in this meeting can update decisions.", 403);
+  }
+  const d = m.decisions.find((x) => x.id === decisionId);
+  if (!d) throw new AppError("Decision not found.", 404);
+
+  d.done = !!done;
+  d.doneById = done ? actor.id : null;
+  d.doneByName = done ? actor.name : null;
+  d.doneAt = done ? now() : null;
+  m.updatedAt = now();
+  await save(m);
+  return toDTO(m);
+}
+
+export async function deleteDecision(actor, id, decisionId) {
+  const m = await rawById(id);
+  if (!m) throw new AppError("Meeting not found.", 404);
+  if (!isParticipant(actor, m)) {
+    throw new AppError("You can't remove this decision.", 403);
+  }
+  m.decisions = m.decisions.filter((x) => x.id !== decisionId);
   m.updatedAt = now();
   await save(m);
   return toDTO(m);

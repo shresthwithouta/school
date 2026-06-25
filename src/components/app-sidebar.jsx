@@ -16,6 +16,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { NavUser } from "@/components/nav-user";
 import { navForRole } from "@/lib/nav";
@@ -28,6 +29,7 @@ function isActive(pathname, href) {
 
 export function AppSidebar({ user }) {
   const pathname = usePathname();
+  const { toggleSidebar } = useSidebar();
   const sections = navForRole(user.role);
 
   return (
@@ -76,6 +78,14 @@ export function AppSidebar({ user }) {
             </SidebarGroupContent>
           </SidebarGroup>
         ))}
+        {/* Click the empty area to collapse / expand the sidebar. */}
+        <button
+          type="button"
+          aria-label="Toggle sidebar"
+          onClick={toggleSidebar}
+          className="flex-1 cursor-pointer"
+          tabIndex={-1}
+        />
       </SidebarContent>
 
       <SidebarFooter>

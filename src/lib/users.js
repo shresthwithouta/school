@@ -1,11 +1,15 @@
 import bcrypt from "bcryptjs";
 
 import { AppError } from "@/lib/errors";
+import { connectToDatabase } from "@/lib/db";
 import { store, } from "@/lib/store";
+import Task from "@/models/Task";
+import Meeting from "@/models/Meeting";
 import {
   ROLE_TIERS,
   TIERS,
   assignableRoles,
+  canAssignTaskTo,
   canManage,
   canManageTarget,
   getTier,
@@ -79,6 +83,21 @@ export async function listVisibleUsers(actor) {
   return all
     .filter((u) => roles.has(u.role))
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+    .map(toDTO);
+}
+
+/**
+ * People the actor may ASSIGN TASKS to — driven by role rank, not visibility
+ * tiers. A Teacher can assign to other Teachers/Accountants even though user
+ * management hides them. Always includes the actor (self-assignment).
+ * Inactive accounts are excluded — you can't hand work to a disabled user.
+ */
+export async function listAssignableTaskUsers(actor) {
+  const all = await store.list();
+  return all
+    .filter((u) => u.isActive ?? true)
+    .filter((u) => u.id === actor.id || canAssignTaskTo(actor.role, u.role))
+    .sort((a, b) => (a.name < b.name ? -1 : 1))
     .map(toDTO);
 }
 
@@ -193,6 +212,10 @@ export async function updateUser(
     }
     patch.isActive = input.isActive;
   }
+  if (input.password) {
+    patch.passwordHash = await bcrypt.hash(input.password, 10);
+    patch.mustChangePassword = true;
+  }
 
   const updated = await store.update(id, patch);
   if (!updated) throw new AppError("User not found.", 404);
@@ -212,6 +235,28 @@ export async function deleteUser(
 
   if (!canManageTarget(actor.role, u.role)) {
     throw new AppError("You are not allowed to delete this user.", 403);
+  }
+
+  // Tasks and meetings store denormalized copies of the user, so a hard delete
+  // would orphan them (a task assigned only to a deleted user can never be
+  // completed, and their analytics linger forever). If the account is
+  // referenced anywhere, refuse and steer the admin to deactivation instead —
+  // a deactivated user keeps their history but can't log in or be assigned new
+  // work.
+  await connectToDatabase();
+  const [taskRefs, meetingRefs] = await Promise.all([
+    Task.countDocuments({
+      $or: [{ assignerId: id }, { "assignees.id": id }],
+    }),
+    Meeting.countDocuments({
+      $or: [{ createdById: id }, { "attendees.id": id }],
+    }),
+  ]);
+  if (taskRefs > 0 || meetingRefs > 0) {
+    throw new AppError(
+      "This person is still referenced by tasks or meetings. Deactivate the account instead of deleting it to preserve that history.",
+      409
+    );
   }
 
   await store.remove(id);

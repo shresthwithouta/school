@@ -13,18 +13,20 @@ import {
 } from "lucide-react";
 
 import { requireUser } from "@/lib/session";
-import { canManage } from "@/lib/rbac";
+import { canManage, isOwner } from "@/lib/rbac";
 import { getTeamStats, listVisibleUsers } from "@/lib/users";
 import { getTaskStats, listVisibleTasks } from "@/lib/tasks";
-import { listVisibleMeetings } from "@/lib/meetings";
+import { listVisibleMeetings, listPendingDecisions } from "@/lib/meetings";
 import { cn, formatDate, formatDateTime, getInitials } from "@/lib/utils";
 
 import { StatCard } from "@/components/stat-card";
+import { PendingDecisions } from "@/components/dashboard/pending-decisions";
 import { TierBadge } from "@/components/role-badge";
 import { StatusBadge, PriorityBadge } from "@/components/tasks/task-badges";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -41,28 +43,290 @@ function greeting() {
   return "Good evening";
 }
 
+const MINI_ACCENTS = {
+  sky: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  amber: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  emerald: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  rose: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
+};
+
+/** Compact KPI tile so all four sit comfortably in a single row. */
+function MiniStat({ title, value, icon: Icon, accent }) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border bg-card p-3">
+      <div
+        className={cn(
+          "flex size-9 shrink-0 items-center justify-center rounded-lg",
+          MINI_ACCENTS[accent]
+        )}
+      >
+        <Icon className="size-4" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-2xl font-semibold leading-none tracking-tight">
+          {value}
+        </p>
+        <p className="mt-1 truncate text-xs text-muted-foreground">{title}</p>
+      </div>
+    </div>
+  );
+}
+
+/** Numbered index chip for the concise dashboard lists. */
+function IndexChip({ n }) {
+  return (
+    <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-medium text-muted-foreground">
+      {n}
+    </span>
+  );
+}
+
 export default async function DashboardPage() {
   const user = await requireUser();
   const manage = canManage(user.role);
+  const chair = isOwner(user.role);
   const firstName = user.name.split(" ")[0] || user.name;
 
-  const [taskStats, tasks, teamStats, recentMembers, meetings] =
+  const [taskStats, tasks, teamStats, recentMembers, meetings, pendingDecisions] =
     await Promise.all([
       getTaskStats(user),
       listVisibleTasks(user),
-      manage ? getTeamStats(user) : Promise.resolve(null),
-      manage
+      manage && !chair ? getTeamStats(user) : Promise.resolve(null),
+      manage && !chair
         ? listVisibleUsers(user).then((u) =>
             u.filter((x) => x.id !== user.id).slice(0, 5)
           )
         : Promise.resolve([]),
       listVisibleMeetings(user),
+      listPendingDecisions(user),
     ]);
+
+  const decisionsCard = (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Pending meeting decisions</CardTitle>
+        <CardDescription>Action points from meetings you attended</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <PendingDecisions decisions={pendingDecisions} />
+      </CardContent>
+    </Card>
+  );
 
   const upcomingMeetings = meetings
     .filter((m) => m.status === "scheduled")
     .slice(0, 4);
 
+  // KPI row — shared by every dashboard.
+  const kpis = [
+    { title: "Pending", value: taskStats.pending, icon: ClipboardList, accent: "sky" },
+    { title: "In progress", value: taskStats.inProgress, icon: Clock, accent: "amber" },
+    { title: "Completed", value: taskStats.completed, icon: CheckCircle2, accent: "emerald" },
+    { title: "Delayed", value: taskStats.delayed, icon: AlertTriangle, accent: "rose" },
+  ];
+
+  const header = (
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="space-y-1">
+        <h2 className="text-2xl font-semibold tracking-tight">
+          {greeting()}, {firstName}
+        </h2>
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <span>{user.role}</span>
+          <span aria-hidden>•</span>
+          <TierBadge role={user.role} />
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <span className="hidden items-center gap-1.5 text-sm text-muted-foreground sm:inline-flex">
+          <CalendarDays className="size-4" />
+          {formatDate(new Date())}
+        </span>
+        <Button asChild>
+          <Link href="/tasks/new">
+            <Plus className="size-4" />
+            New task
+          </Link>
+        </Button>
+      </div>
+    </div>
+  );
+
+  // ── Chairman / Director: clean, org-wide overview ──────────────────
+  if (chair) {
+    const pending = tasks
+      .filter((t) => ["assigned", "in_progress", "delayed"].includes(t.status))
+      .sort((a, b) => {
+        if (a.delayed !== b.delayed) return a.delayed ? -1 : 1;
+        if (!a.dueDate) return 1;
+        if (!b.dueDate) return -1;
+        return a.dueDate < b.dueDate ? -1 : 1;
+      })
+      .slice(0, 7);
+
+    const completed = tasks.filter((t) => t.status === "completed").slice(0, 5);
+
+    return (
+      <div className="space-y-6">
+        {header}
+
+        {/* Compact KPIs — single row */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {kpis.map((k) => (
+            <MiniStat key={k.title} {...k} />
+          ))}
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-3">
+          {/* Pending tasks across the school */}
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle>Pending tasks</CardTitle>
+              <CardDescription>
+                Open work across the school, most urgent first
+              </CardDescription>
+              <CardAction>
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/tasks">
+                    View all
+                    <ArrowRight className="size-4" />
+                  </Link>
+                </Button>
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              {pending.length === 0 ? (
+                <p className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
+                  Nothing pending. Everything is on track.
+                </p>
+              ) : (
+                <ol className="divide-y">
+                  {pending.map((t, i) => (
+                    <li key={t.id}>
+                      <Link
+                        href={`/tasks/${t.key}`}
+                        className="-mx-2 flex items-center gap-3 rounded-md px-2 py-3 transition-colors hover:bg-accent/40"
+                      >
+                        <IndexChip n={i + 1} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium">{t.title}</p>
+                          <div className="mt-1 flex flex-wrap items-center gap-2">
+                            <StatusBadge status={t.status} />
+                            <PriorityBadge priority={t.priority} />
+                            <span className="text-xs text-muted-foreground">
+                              {t.assignees.length}{" "}
+                              {t.assignees.length === 1 ? "person" : "people"}
+                            </span>
+                          </div>
+                        </div>
+                        {t.dueDate && (
+                          <span
+                            className={cn(
+                              "inline-flex shrink-0 items-center gap-1 text-xs",
+                              t.overdue
+                                ? "font-medium text-rose-600 dark:text-rose-400"
+                                : "text-muted-foreground"
+                            )}
+                          >
+                            <CalendarDays className="size-3.5" />
+                            {formatDate(t.dueDate)}
+                          </span>
+                        )}
+                      </Link>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Side column: meetings + recently completed */}
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Upcoming meetings</CardTitle>
+                <CardDescription>Scheduled sessions</CardDescription>
+                <CardAction>
+                  <Button asChild variant="ghost" size="icon">
+                    <Link href="/meetings">
+                      <ArrowRight className="size-4" />
+                    </Link>
+                  </Button>
+                </CardAction>
+              </CardHeader>
+              <CardContent>
+                {upcomingMeetings.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No upcoming meetings.
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {upcomingMeetings.map((m) => (
+                      <li key={m.id}>
+                        <Link
+                          href={`/meetings/${m.key}`}
+                          className="-mx-2 flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-accent/40"
+                        >
+                          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                            <CalendarClock className="size-4" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium">
+                              {m.title}
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {m.scheduledAt
+                                ? formatDateTime(m.scheduledAt)
+                                : "No time set"}
+                            </p>
+                          </div>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Recently completed</CardTitle>
+                <CardDescription>Latest closed work</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {completed.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No completed tasks yet.
+                  </p>
+                ) : (
+                  <ol className="space-y-2">
+                    {completed.map((t, i) => (
+                      <li key={t.id}>
+                        <Link
+                          href={`/tasks/${t.key}`}
+                          className="-mx-2 flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-accent/40"
+                        >
+                          <IndexChip n={i + 1} />
+                          <p className="min-w-0 flex-1 truncate text-sm font-medium">
+                            {t.title}
+                          </p>
+                          <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
+                        </Link>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {decisionsCard}
+      </div>
+    );
+  }
+
+  // ── Everyone else: personal task view ──────────────────────────────
   const myOpen = tasks
     .map((t) => ({ task: t, mine: t.assignees.find((a) => a.id === user.id) }))
     .filter((x) => x.mine && x.mine.status !== "completed")
@@ -75,78 +339,35 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* Greeting */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="space-y-1">
-          <h2 className="text-2xl font-semibold tracking-tight">
-            {greeting()}, {firstName}
-          </h2>
-          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            <span>{user.role}</span>
-            <span aria-hidden>•</span>
-            <TierBadge role={user.role} />
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="hidden items-center gap-1.5 text-sm text-muted-foreground sm:inline-flex">
-            <CalendarDays className="size-4" />
-            {formatDate(new Date())}
-          </span>
-          <Button asChild>
-            <Link href="/tasks">
-              <Plus className="size-4" />
-              New task
-            </Link>
-          </Button>
-        </div>
-      </div>
+      {header}
 
       {/* Real task stats */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          title="Pending"
-          value={taskStats.pending}
-          hint="Awaiting acceptance / start"
-          icon={ClipboardList}
-          accent="sky"
-        />
-        <StatCard
-          title="In progress"
-          value={taskStats.inProgress}
-          hint="Currently being worked on"
-          icon={Clock}
-          accent="amber"
-        />
-        <StatCard
-          title="Completed"
-          value={taskStats.completed}
-          hint="Approved & closed"
-          icon={CheckCircle2}
-          accent="emerald"
-        />
-        <StatCard
-          title="Overdue"
-          value={taskStats.overdue}
-          hint="Past their deadline"
-          icon={AlertTriangle}
-          accent="rose"
-        />
+        {kpis.map((k) => (
+          <StatCard
+            key={k.title}
+            title={k.title}
+            value={k.value}
+            icon={k.icon}
+            accent={k.accent}
+          />
+        ))}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* My tasks */}
         <Card className="lg:col-span-2">
-          <CardHeader className="flex-row items-center justify-between space-y-0">
-            <div>
-              <CardTitle>My tasks</CardTitle>
-              <CardDescription>Open work assigned to you</CardDescription>
-            </div>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/tasks">
-                View all
-                <ArrowRight className="size-4" />
-              </Link>
-            </Button>
+          <CardHeader>
+            <CardTitle>My tasks</CardTitle>
+            <CardDescription>Open work assigned to you</CardDescription>
+            <CardAction>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/tasks">
+                  View all
+                  <ArrowRight className="size-4" />
+                </Link>
+              </Button>
+            </CardAction>
           </CardHeader>
           <CardContent>
             {myOpen.length === 0 ? (
@@ -155,7 +376,7 @@ export default async function DashboardPage() {
                   You have no open tasks. Nice and clear.
                 </p>
                 <Button asChild size="sm" className="mt-3">
-                  <Link href="/tasks">
+                  <Link href="/tasks/new">
                     <Plus className="size-4" />
                     Create a task
                   </Link>
@@ -166,7 +387,7 @@ export default async function DashboardPage() {
                 {myOpen.map(({ task: t, mine }) => (
                   <li key={t.id}>
                     <Link
-                      href="/tasks"
+                      href={`/tasks/${t.key}`}
                       className="flex items-center gap-3 py-3 transition-colors hover:bg-accent/40 -mx-2 px-2 rounded-md"
                     >
                       <div className="min-w-0 flex-1">
@@ -200,17 +421,17 @@ export default async function DashboardPage() {
         {/* Right column */}
         {manage && teamStats ? (
           <Card>
-            <CardHeader className="flex-row items-center justify-between space-y-0">
-              <div>
-                <CardTitle>Team overview</CardTitle>
-                <CardDescription>People you oversee</CardDescription>
-              </div>
-              <Button asChild variant="outline" size="sm">
-                <Link href="/users">
-                  Manage
-                  <ArrowRight className="size-4" />
-                </Link>
-              </Button>
+            <CardHeader>
+              <CardTitle>Team overview</CardTitle>
+              <CardDescription>People you oversee</CardDescription>
+              <CardAction>
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/users">
+                    Manage
+                    <ArrowRight className="size-4" />
+                  </Link>
+                </Button>
+              </CardAction>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-3 gap-2 text-center">
@@ -290,7 +511,7 @@ export default async function DashboardPage() {
                 </div>
               </div>
               <Button asChild variant="outline" className="w-full">
-                <Link href="/profile">
+                <Link href="/settings">
                   Edit profile
                   <ArrowRight className="size-4" />
                 </Link>
@@ -302,17 +523,17 @@ export default async function DashboardPage() {
 
       {/* Upcoming meetings */}
       <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0">
-          <div>
-            <CardTitle>Upcoming meetings</CardTitle>
-            <CardDescription>Scheduled meetings you can join</CardDescription>
-          </div>
-          <Button asChild variant="outline" size="sm">
-            <Link href="/meetings">
-              View all
-              <ArrowRight className="size-4" />
-            </Link>
-          </Button>
+        <CardHeader>
+          <CardTitle>Upcoming meetings</CardTitle>
+          <CardDescription>Scheduled meetings you can join</CardDescription>
+          <CardAction>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/meetings">
+                View all
+                <ArrowRight className="size-4" />
+              </Link>
+            </Button>
+          </CardAction>
         </CardHeader>
         <CardContent>
           {upcomingMeetings.length === 0 ? (
@@ -322,7 +543,7 @@ export default async function DashboardPage() {
               {upcomingMeetings.map((m) => (
                 <li key={m.id}>
                   <Link
-                    href={`/meetings/${m.id}`}
+                    href={`/meetings/${m.key}`}
                     className="-mx-2 flex items-center gap-3 rounded-md px-2 py-3 transition-colors hover:bg-accent/40"
                   >
                     <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -343,6 +564,8 @@ export default async function DashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {decisionsCard}
     </div>
   );
 }

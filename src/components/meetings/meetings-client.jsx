@@ -56,7 +56,7 @@ export function MeetingsClient({
           {meetings.map((m) => (
             <Link
               key={m.id}
-              href={`/meetings/${m.id}`}
+              href={`/meetings/${m.key}`}
               className="block rounded-xl border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-accent/40"
             >
               <div className="flex items-start justify-between gap-3">

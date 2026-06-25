@@ -3,30 +3,33 @@
  * (The data layer in `lib/tasks.ts` uses the filesystem and is server-only.)
  */
 
+/** Task-level statuses (used for badges and the status filter). */
 export const TASK_STATUSES = [
+  "draft",
   "assigned",
-  "accepted",
   "in_progress",
-  "submitted",
+  "delayed",
   "completed",
+  "cancelled",
 ] ;
- 
+
+/** Statuses a single assignee can hold. */
+export const ASSIGNEE_STATUSES = ["assigned", "in_progress", "completed"] ;
 
 export const STATUS_META
 
 
  = {
+  draft: {
+    label: "Draft",
+    description: "Not assigned to anyone yet.",
+    badgeClass: "border-border bg-muted text-muted-foreground",
+  },
   assigned: {
     label: "Assigned",
-    description: "Waiting for the assignee to accept.",
+    description: "Assigned, not started yet.",
     badgeClass:
       "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-400",
-  },
-  accepted: {
-    label: "Accepted",
-    description: "Accepted, not started yet.",
-    badgeClass:
-      "border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-400",
   },
   in_progress: {
     label: "In progress",
@@ -34,17 +37,34 @@ export const STATUS_META
     badgeClass:
       "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
   },
-  submitted: {
-    label: "In review",
-    description: "Submitted, awaiting review.",
+  delayed: {
+    label: "Delayed",
+    description: "Past its due date and not yet completed.",
     badgeClass:
-      "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400",
+      "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-400",
   },
   completed: {
     label: "Completed",
-    description: "Approved and closed.",
+    description: "All work is done.",
     badgeClass:
       "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  },
+  cancelled: {
+    label: "Cancelled",
+    description: "This task was cancelled.",
+    badgeClass:
+      "border-border bg-muted text-muted-foreground line-through",
+  },
+  // ── Legacy assignee statuses kept so old data still renders ──
+  accepted: {
+    label: "Accepted",
+    badgeClass:
+      "border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-400",
+  },
+  submitted: {
+    label: "Submitted",
+    badgeClass:
+      "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400",
   },
 };
 
@@ -104,31 +124,24 @@ export const SUBTASK_STATUS_META
 };
 
 /** Workflow actions a user can take on a task. */
- 
+
 
 export const ACTION_META = {
-  accept: { label: "Accept" },
   start: { label: "Start work" },
-  submit: { label: "Submit for review" },
-  approve: { label: "Approve" },
-  reject: { label: "Request changes" },
+  complete: { label: "Mark complete" },
+  cancel: { label: "Cancel task" },
+  reopen: { label: "Reopen" },
 };
 
 /** Actions available to an assignee based on their own per-person status. */
 export function assigneeActions(status) {
   switch (status) {
     case "assigned":
-      return ["accept"];
-    case "accepted":
-      return ["start", "submit"];
+      return ["start", "complete"];
+    case "accepted": // legacy
     case "in_progress":
-      return ["submit"];
+      return ["complete"];
     default:
       return [];
   }
-}
-
-/** Can an assignee edit their progress in this status? */
-export function canEditProgress(status) {
-  return status === "accepted" || status === "in_progress";
 }

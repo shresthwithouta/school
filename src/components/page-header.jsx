@@ -1,23 +1,10 @@
-export function PageHeader({
-  title,
-  description,
-  children,
-}
-
-
-
-) {
-  return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="space-y-1">
-        <h2 className="text-2xl font-semibold tracking-tight">{title}</h2>
-        {description && (
-          <p className="text-sm text-muted-foreground">{description}</p>
-        )}
-      </div>
-      {children && (
-        <div className="flex items-center gap-2 sm:shrink-0">{children}</div>
-      )}
-    </div>
-  );
+/**
+ * Optional action bar for a page. The page name already shows in the top
+ * navbar, so this intentionally renders no heading or description — it only
+ * holds action buttons passed as children (and nothing at all if there are
+ * none). This is an internal tool; pages don't need explanatory copy.
+ */
+export function PageHeader({ children }) {
+  if (!children) return null;
+  return <div className="flex items-center justify-end gap-2">{children}</div>;
 }

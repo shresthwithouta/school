@@ -86,9 +86,9 @@ export function NavUser({ user }) {
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-              <Link href="/profile" className="gap-2">
+              <Link href="/settings" className="gap-2">
                 <UserCircle className="size-4" />
-                Profile
+                Profile & settings
               </Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />

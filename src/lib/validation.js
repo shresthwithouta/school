@@ -21,6 +21,13 @@ export const updateUserSchema = z.object({
   department: optionalText(80),
   phone: optionalText(30),
   isActive: z.boolean().optional(),
+  // Optional: a manager can set a new password for the member.
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters")
+    .max(100)
+    .optional()
+    .or(z.literal("")),
 });
 
 export const updateProfileSchema = z.object({
@@ -68,10 +75,8 @@ const richText = z.string().max(20000).optional().or(z.literal(""));
 export const createTaskSchema = z.object({
   title: z.string().trim().min(2, "Title is too short").max(140),
   description: richText,
-  assigneeIds: z
-    .array(z.string().min(1))
-    .min(1, "Choose at least one person")
-    .max(25),
+  // Empty = a draft task (not assigned to anyone yet).
+  assigneeIds: z.array(z.string().min(1)).max(25).optional().default([]),
   priority: priorityEnum.default("medium"),
   dueDate: z.string().trim().optional().or(z.literal("")),
 });
@@ -79,27 +84,14 @@ export const createTaskSchema = z.object({
 export const updateTaskSchema = z.object({
   title: z.string().trim().min(2).max(140).optional(),
   description: richText,
-  assigneeIds: z.array(z.string().min(1)).min(1).max(25).optional(),
+  assigneeIds: z.array(z.string().min(1)).max(25).optional(),
   priority: priorityEnum.optional(),
   dueDate: z.string().trim().optional().or(z.literal("")),
 });
 
-const ratingSchema = z.coerce.number().int().min(1).max(5);
-
 export const transitionSchema = z.object({
-  action: z.enum(["accept", "start", "progress", "submit", "approve", "reject"]),
-  /** Target assignee for review actions (approve/reject). */
-  assigneeId: z.string().min(1).optional(),
-  progress: z.coerce.number().int().min(0).max(100).optional(),
+  action: z.enum(["start", "complete", "cancel", "reopen"]),
   note: optionalText(1000),
-  feedback: optionalText(1000),
-  evaluation: z
-    .object({
-      timeliness: ratingSchema,
-      quality: ratingSchema,
-      accuracy: ratingSchema,
-    })
-    .optional(),
 });
 
 export const attachmentSchema = z.object({
@@ -167,6 +159,16 @@ export const meetingMessageSchema = z.object({
 
 export const endMeetingSchema = z.object({
   summary: richText,
+});
+
+export const decisionSchema = z.object({
+  // One or more points, one per line.
+  text: z.string().trim().min(1, "Decision cannot be empty").max(2000),
+  dueDate: z.string().trim().optional().or(z.literal("")),
+});
+
+export const decisionUpdateSchema = z.object({
+  done: z.boolean(),
 });
 
  

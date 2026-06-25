@@ -3,9 +3,7 @@ import { Users, Shield, UserCheck, UserX } from "lucide-react";
 
 import { requireManager } from "@/lib/session";
 import { getTeamStats, listVisibleUsers } from "@/lib/users";
-import { isOwner } from "@/lib/rbac";
 
-import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
 import { UsersManager } from "@/components/users/users-manager";
 
@@ -18,15 +16,9 @@ export default async function UsersPage() {
     getTeamStats(actor),
   ]);
 
-  const description = isOwner(actor.role)
-    ? "Create and manage every account across the school."
-    : "Create and manage worker accounts in your area.";
-
   return (
     <div className="space-y-6">
-      <PageHeader title="Team management" description={description} />
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard title="Total members" value={stats.total} icon={Users} />
         <StatCard
           title="Admins"

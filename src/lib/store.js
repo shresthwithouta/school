@@ -30,9 +30,19 @@ import { DEMO_ACCOUNTS } from "@/lib/demo";
 
 let seeded = false;
 
+// Seeding ships three accounts with publicly-known passwords (owner123, etc.).
+// That's fine for local/demo use but a takeover risk in production, so only
+// seed outside production unless explicitly opted in via SEED_DEMO=true.
+const ALLOW_DEMO_SEED =
+  process.env.NODE_ENV !== "production" || process.env.SEED_DEMO === "true";
+
 async function ensureSeeded() {
   await connectToDatabase();
   if (seeded) return;
+  if (!ALLOW_DEMO_SEED) {
+    seeded = true;
+    return;
+  }
   const count = await User.estimatedDocumentCount();
   if (count === 0) {
     const now = new Date().toISOString();

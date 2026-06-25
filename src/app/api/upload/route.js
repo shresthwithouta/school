@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 
 import { handleApiError, requireApiUser } from "@/lib/api";
 import { AppError } from "@/lib/errors";
-import { cloudinaryConfigured, uploadBuffer } from "@/lib/cloudinary";
-import { kindFromMime } from "@/lib/attachment";
+import { cloudinaryConfigured, uploadBuffer, destroyAsset } from "@/lib/cloudinary";
+import { kindFromMime, isAllowedMime, isBlockedFormat } from "@/lib/attachment";
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB
 
@@ -25,9 +25,22 @@ export async function POST(req) {
     if (file.size > MAX_BYTES) {
       throw new AppError("File must be under 25 MB.", 400);
     }
+    if (!isAllowedMime(file.type)) {
+      throw new AppError(
+        "That file type isn't allowed. Upload an image, audio/video, PDF, Office document, text or zip file.",
+        400
+      );
+    }
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const res = await uploadBuffer(buffer);
+
+    // Cloudinary detects the true format from the bytes — reject (and clean up)
+    // anything dangerous even if the declared MIME type passed the check above.
+    if (isBlockedFormat(res.format)) {
+      await destroyAsset(res.public_id, res.resource_type);
+      throw new AppError("That file type isn't allowed.", 400);
+    }
 
     return NextResponse.json({
       url: res.secure_url,

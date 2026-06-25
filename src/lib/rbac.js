@@ -1,95 +1,115 @@
 /**
  * Role-Based Access Control.
  *
- * Roles keep the exact titles from the requirements document. Each role belongs
- * to one of three visibility TIERS that drive who can see and manage whom:
+ * Two independent concepts live here:
  *
- *   OWNER  — sees everyone, manages everyone        (top of the hierarchy)
- *   ADMIN  — sees other Admins + Workers            (cannot see Owners)
- *   WORKER — sees only their own scope              (bottom of the hierarchy)
+ * 1. Visibility TIERS — who can SEE and MANAGE whom (the /users area, team
+ *    stats, task visibility). Three tiers:
+ *      OWNER  — sees everyone, manages everyone        (top of the hierarchy)
+ *      ADMIN  — sees other Admins + Workers            (cannot see Owners)
+ *      WORKER — sees only their own scope              (bottom of the hierarchy)
  *
- * To re-map a role to a different tier, just change ROLE_TIERS below.
+ * 2. Task-assignment RANK — who may ASSIGN a task to whom. This is a finer
+ *    grain than tiers: a Teacher (a Worker) can still hand work to other
+ *    Teachers/Accountants even though they can't see them in user management.
+ *    Rule: you may assign to anyone at your own rank or below (rank 1 is the
+ *    highest authority). See ROLE_RANKS / canAssignTaskTo below.
+ *
+ * To re-map a role, change ROLE_TIERS and ROLE_RANKS below.
  */
 
 export const TIERS = {
   OWNER: "OWNER",
   ADMIN: "ADMIN",
   WORKER: "WORKER",
-} ;
+};
 
- 
-
-/** Canonical role values (stored in the DB). Titles taken from the PDF. */
+/** Canonical role values (stored in the DB). Top of list = highest authority. */
 export const ROLES = [
   "Chairman/Director",
   "Principal",
-  "Academic Coordinator",
-  "Administrative Manager",
-  "Event Coordinator",
-  "Accountant",
+  "Manager",
+  "Coordinators",
   "Teacher",
-  "Class Teacher",
-  "Team Member",
-] ;
-
- 
+  "Accountant",
+  "Other Staff",
+];
 
 /** Maps every role to its visibility tier. */
 export const ROLE_TIERS = {
   "Chairman/Director": TIERS.OWNER,
   Principal: TIERS.ADMIN,
-  "Academic Coordinator": TIERS.ADMIN,
-  "Administrative Manager": TIERS.ADMIN,
-  "Event Coordinator": TIERS.ADMIN,
-  Accountant: TIERS.WORKER,
+  Manager: TIERS.ADMIN,
+  Coordinators: TIERS.WORKER,
   Teacher: TIERS.WORKER,
-  "Class Teacher": TIERS.WORKER,
-  "Team Member": TIERS.WORKER,
+  Accountant: TIERS.WORKER,
+  "Other Staff": TIERS.WORKER,
 };
+
+/**
+ * Task-assignment authority. Lower number = higher authority.
+ * You can assign tasks to anyone whose rank is >= your own rank.
+ *   1  Chairman/Director  → can assign to everyone
+ *   2  Principal, Manager → everyone except Chairman/Director (and each other)
+ *   3  Coordinators, Teacher, Accountant → each other + Other Staff
+ *   4  Other Staff        → Other Staff only (lowest)
+ */
+export const ROLE_RANKS = {
+  "Chairman/Director": 1,
+  Principal: 2,
+  Manager: 2,
+  Coordinators: 3,
+  Teacher: 3,
+  Accountant: 3,
+  "Other Staff": 4,
+};
+
+/** Unknown / legacy roles fall to the bottom rank. */
+const LOWEST_RANK = 99;
 
 /** Short human label + description for each role (used in the UI). */
 export const ROLE_META = {
   "Chairman/Director": {
     tier: TIERS.OWNER,
-    description: "Full oversight of every person, task and report.",
+    description: "Top authority. Full oversight; can assign work to anyone.",
   },
   Principal: {
     tier: TIERS.ADMIN,
-    description: "Leads academics & operations; assigns event coordinators.",
+    description:
+      "Leads the school. Assigns work to anyone except the Chairman/Director.",
   },
-  "Academic Coordinator": {
+  Manager: {
     tier: TIERS.ADMIN,
-    description: "Coordinates teachers and academic tasks.",
+    description:
+      "Runs operations. Assigns work to the Principal and everyone below.",
   },
-  "Administrative Manager": {
-    tier: TIERS.ADMIN,
-    description: "Manages administrative operations and staff.",
-  },
-  "Event Coordinator": {
-    tier: TIERS.ADMIN,
-    description: "Builds event teams, assigns tasks and tracks budgets.",
-  },
-  Accountant: {
+  Coordinators: {
     tier: TIERS.WORKER,
-    description: "Handles budgets, procurement and finance tasks.",
+    description: "Coordinates teachers, accountants and staff tasks.",
   },
   Teacher: {
     tier: TIERS.WORKER,
     description: "Executes assigned academic and class tasks.",
   },
-  "Class Teacher": {
+  Accountant: {
     tier: TIERS.WORKER,
-    description: "Owns a class; handles class-level responsibilities.",
+    description: "Handles budgets, procurement and finance tasks.",
   },
-  "Team Member": {
+  "Other Staff": {
     tier: TIERS.WORKER,
-    description: "Contributes to event or department teams.",
+    description: "Support staff who carry out assigned tasks.",
   },
 };
 
 export function getTier(role) {
-  if (role && role in ROLE_TIERS) return ROLE_TIERS[role ];
+  if (role && role in ROLE_TIERS) return ROLE_TIERS[role];
   return TIERS.WORKER;
+}
+
+/** Task-assignment rank for a role (lower = more authority). */
+export function getRank(role) {
+  if (role && role in ROLE_RANKS) return ROLE_RANKS[role];
+  return LOWEST_RANK;
 }
 
 export function isOwner(role) {
@@ -108,6 +128,20 @@ export function isWorker(role) {
 export function canManage(role) {
   const t = getTier(role);
   return t === TIERS.OWNER || t === TIERS.ADMIN;
+}
+
+/**
+ * Whether `actorRole` may assign a task to someone with `targetRole`.
+ * You can assign to your own rank or anyone below you. Pure (client-safe);
+ * also re-enforced server-side in lib/tasks.
+ */
+export function canAssignTaskTo(actorRole, targetRole) {
+  return getRank(targetRole) >= getRank(actorRole);
+}
+
+/** Roles an actor is allowed to assign tasks to. */
+export function assignableTaskRoles(actorRole) {
+  return ROLES.filter((r) => canAssignTaskTo(actorRole, r));
 }
 
 /**
@@ -143,10 +177,7 @@ export function canCreateUsers(role) {
  *   Worker -> no one
  * Pure function (client-safe) — also enforced server-side in lib/users.
  */
-export function canManageTarget(
-  actorRole,
-  targetRole
-) {
+export function canManageTarget(actorRole, targetRole) {
   const a = getTier(actorRole);
   const t = getTier(targetRole);
   if (a === TIERS.OWNER) return true;
