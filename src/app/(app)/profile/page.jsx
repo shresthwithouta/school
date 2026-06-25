@@ -1,5 +1,3 @@
-
-import { notFound } from "next/navigation";
 import { Mail, Phone, Building2, CalendarDays } from "lucide-react";
 
 import { requireUser } from "@/lib/session";
@@ -10,6 +8,7 @@ import { PageHeader } from "@/components/page-header";
 import { TierBadge, RoleBadge } from "@/components/role-badge";
 import { ProfileForm } from "@/components/profile/profile-form";
 import { PasswordForm } from "@/components/profile/password-form";
+import { SessionNotice } from "@/components/profile/session-notice";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -19,7 +18,20 @@ export const metadata = { title: "Profile" };
 export default async function ProfilePage() {
   const session = await requireUser();
   const me = await getUserByIdForActor(session, session.id);
-  if (!me) notFound();
+
+  // Stale session (e.g. the account was removed) — prompt a clean re-login
+  // instead of a hard 404.
+  if (!me) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="My profile"
+          description="Manage your personal details and account security."
+        />
+        <SessionNotice />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
