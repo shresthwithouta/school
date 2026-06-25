@@ -5,6 +5,8 @@ import {
   Users,
   BarChart3,
   UserCircle,
+  Settings,
+  CheckCheck,
 } from "lucide-react";
 
 import { canManage, isOwner } from "@/lib/rbac";
@@ -22,12 +24,16 @@ export const NAV_SECTIONS = [
     label: "Management",
     items: [
       { title: "Team", href: "/users", icon: Users, manageOnly: true },
+      { title: "Approvals", href: "/approvals", icon: CheckCheck, manageOnly: true },
       { title: "Analytics", href: "/reports", icon: BarChart3, manageOnly: true },
     ],
   },
   {
     label: "Account",
-    items: [{ title: "Profile", href: "/profile", icon: UserCircle }],
+    items: [
+      { title: "Profile", href: "/profile", icon: UserCircle },
+      { title: "Settings", href: "/settings", icon: Settings, ownerOnly: true },
+    ],
   },
 ];
 

@@ -24,8 +24,8 @@ const HIGHLIGHTS = [
   },
   {
     icon: CalendarCheck,
-    title: "Meetings & events",
-    desc: "Schedule, record minutes and coordinate event teams.",
+    title: "Meetings",
+    desc: "Schedule, record minutes and track who attended.",
   },
   {
     icon: BarChart3,
