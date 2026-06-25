@@ -8,8 +8,8 @@ export function Providers({ children }) {
   return (
     <ThemeProvider
       attribute="class"
-      defaultTheme="system"
-      enableSystem
+      defaultTheme="light"
+      enableSystem={false}
       disableTransitionOnChange
     >
       <TooltipProvider delayDuration={300}>{children}</TooltipProvider>

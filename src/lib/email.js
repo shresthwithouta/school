@@ -3,7 +3,15 @@ import { Resend } from "resend";
 const apiKey = process.env.RESEND_API_KEY;
 const FROM =
   process.env.EMAIL_FROM || "School Workforce <onboarding@resend.dev>";
-const BASE_URL = process.env.AUTH_URL || "http://localhost:3000";
+
+/** Base URL for links in emails — prefers AUTH_URL, then the Vercel domain. */
+function baseUrl() {
+  if (process.env.AUTH_URL) return process.env.AUTH_URL.replace(/\/$/, "");
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL)
+    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return "http://localhost:3000";
+}
 
 const resend = apiKey ? new Resend(apiKey) : null;
 
@@ -46,11 +54,11 @@ export async function sendEmail(opts
 }
 
 export function taskUrl(taskId) {
-  return `${BASE_URL}/tasks/${taskId}`;
+  return `${baseUrl()}/tasks/${taskId}`;
 }
 
 export function meetingUrl(meetingId) {
-  return `${BASE_URL}/meetings/${meetingId}`;
+  return `${baseUrl()}/meetings/${meetingId}`;
 }
 
 export async function emailMeetingInvite(args
