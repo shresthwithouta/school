@@ -14,6 +14,8 @@ const TaskSchema = new Schema(
     assignerRole: { type: String, default: "" },
     // Each assignee: { id, name, role, status, progress, evaluation, acceptedAt, submittedAt, completedAt }
     assignees: { type: [Mixed], default: [] },
+    // Each subtask: { id, title, assigneeId, assigneeName, expectedDate, status, createdAt, completedAt }
+    subtasks: { type: [Mixed], default: [] },
     comments: { type: [Mixed], default: [] },
     activity: { type: [Mixed], default: [] },
     createdAt: { type: String, required: true },

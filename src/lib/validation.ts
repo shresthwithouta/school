@@ -62,9 +62,12 @@ export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 // ── Tasks ──────────────────────────────────────────────────────────
 const priorityEnum = z.enum(TASK_PRIORITIES);
 
+// Rich-text HTML field (sanitized server-side before storing).
+const richText = z.string().max(20000).optional().or(z.literal(""));
+
 export const createTaskSchema = z.object({
   title: z.string().trim().min(2, "Title is too short").max(140),
-  description: optionalText(2000),
+  description: richText,
   assigneeIds: z
     .array(z.string().min(1))
     .min(1, "Choose at least one person")
@@ -75,7 +78,7 @@ export const createTaskSchema = z.object({
 
 export const updateTaskSchema = z.object({
   title: z.string().trim().min(2).max(140).optional(),
-  description: optionalText(2000),
+  description: richText,
   assigneeIds: z.array(z.string().min(1)).min(1).max(25).optional(),
   priority: priorityEnum.optional(),
   dueDate: z.string().trim().optional().or(z.literal("")),
@@ -100,10 +103,25 @@ export const transitionSchema = z.object({
 });
 
 export const commentSchema = z.object({
-  text: z.string().trim().min(1, "Comment cannot be empty").max(1000),
+  text: z.string().min(1, "Comment cannot be empty").max(10000),
+});
+
+export const createSubtaskSchema = z.object({
+  title: z.string().trim().min(2, "Title is too short").max(140),
+  assigneeId: z.string().optional().or(z.literal("")),
+  expectedDate: z.string().trim().optional().or(z.literal("")),
+});
+
+export const updateSubtaskSchema = z.object({
+  title: z.string().trim().min(2).max(140).optional(),
+  assigneeId: z.string().optional(),
+  expectedDate: z.string().optional(),
+  status: z.enum(["todo", "in_progress", "done"]).optional(),
 });
 
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
 export type TransitionInput = z.infer<typeof transitionSchema>;
 export type CommentInput = z.infer<typeof commentSchema>;
+export type CreateSubtaskInput = z.infer<typeof createSubtaskSchema>;
+export type UpdateSubtaskInput = z.infer<typeof updateSubtaskSchema>;

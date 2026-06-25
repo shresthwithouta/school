@@ -2,16 +2,23 @@ import crypto from "crypto";
 
 import { connectToDatabase, stripMongo } from "@/lib/db";
 import { AppError } from "@/lib/errors";
+import { cleanHtml } from "@/lib/sanitize";
 import { isOwner } from "@/lib/rbac";
 import { listVisibleUsers } from "@/lib/users";
 import Task from "@/models/Task";
 import type { SessionUser } from "@/lib/session";
 import type {
+  CreateSubtaskInput,
   CreateTaskInput,
   TransitionInput,
+  UpdateSubtaskInput,
   UpdateTaskInput,
 } from "@/lib/validation";
-import { type TaskPriority, type TaskStatus } from "@/lib/task-meta";
+import {
+  type SubtaskStatus,
+  type TaskPriority,
+  type TaskStatus,
+} from "@/lib/task-meta";
 
 export type TaskComment = {
   id: string;
@@ -52,6 +59,17 @@ export type Assignee = {
   completedAt: string | null;
 };
 
+export type Subtask = {
+  id: string;
+  title: string;
+  assigneeId: string | null;
+  assigneeName: string;
+  expectedDate: string | null;
+  status: SubtaskStatus;
+  createdAt: string;
+  completedAt: string | null;
+};
+
 export type StoredTask = {
   id: string;
   title: string;
@@ -62,6 +80,7 @@ export type StoredTask = {
   assignerName: string;
   assignerRole: string;
   assignees: Assignee[];
+  subtasks: Subtask[];
   comments: TaskComment[];
   activity: TaskActivity[];
   createdAt: string;
@@ -81,6 +100,7 @@ async function rawById(id: string): Promise<StoredTask | null> {
   if (!doc) return null;
   const task = stripMongo<StoredTask>(doc as Record<string, unknown>);
   if (!Array.isArray(task.assignees)) task.assignees = [];
+  if (!Array.isArray(task.subtasks)) task.subtasks = [];
   return task;
 }
 
@@ -179,6 +199,7 @@ export async function listVisibleTasks(actor: SessionUser): Promise<TaskDTO[]> {
     .map((d) => {
       const t = stripMongo<StoredTask>(d as Record<string, unknown>);
       if (!Array.isArray(t.assignees)) t.assignees = [];
+      if (!Array.isArray(t.subtasks)) t.subtasks = [];
       return t;
     })
     .filter((t) => canSee(t, ids))
@@ -251,13 +272,14 @@ export async function createTask(
   const task: StoredTask = {
     id: crypto.randomUUID(),
     title: input.title.trim(),
-    description: input.description?.trim() ?? "",
+    description: cleanHtml(input.description),
     priority: input.priority,
     dueDate: input.dueDate ? new Date(input.dueDate).toISOString() : null,
     assignerId: actor.id,
     assignerName: actor.name,
     assignerRole: actor.role,
     assignees,
+    subtasks: [],
     comments: [],
     activity: [activity(actor, `created this task and assigned it to ${names}`)],
     createdAt: ts,
@@ -283,7 +305,7 @@ export async function updateTask(
   }
 
   if (input.title !== undefined) task.title = input.title.trim();
-  if (input.description !== undefined) task.description = input.description.trim();
+  if (input.description !== undefined) task.description = cleanHtml(input.description);
   if (input.priority !== undefined) task.priority = input.priority;
   if (input.dueDate !== undefined) {
     task.dueDate = input.dueDate ? new Date(input.dueDate).toISOString() : null;
@@ -334,14 +356,134 @@ export async function addComment(
     throw new AppError("You are not allowed to comment on this task.", 403);
   }
 
+  const clean = cleanHtml(text);
+  if (!clean) throw new AppError("Comment cannot be empty.", 400);
+
   task.comments.push({
     id: crypto.randomUUID(),
     authorId: actor.id,
     authorName: actor.name,
-    text: text.trim(),
+    text: clean,
     kind: "comment",
     createdAt: now(),
   });
+  task.updatedAt = now();
+  await saveTask(task);
+  return toDTO(task);
+}
+
+// ── Subtasks (one level deep) ──────────────────────────────────────
+export async function addSubtask(
+  actor: SessionUser,
+  taskId: string,
+  input: CreateSubtaskInput
+): Promise<TaskDTO> {
+  const task = await rawById(taskId);
+  if (!task) throw new AppError("Task not found.", 404);
+  if (!canEdit(actor, task)) {
+    throw new AppError("Only the task owner can add subtasks.", 403);
+  }
+
+  let assigneeId: string | null = null;
+  let assigneeName = "";
+  if (input.assigneeId) {
+    const visible = await listVisibleUsers(actor);
+    const u = visible.find((x) => x.id === input.assigneeId);
+    if (!u) throw new AppError("You cannot assign to that person.", 403);
+    assigneeId = u.id;
+    assigneeName = u.name;
+  }
+
+  const sub: Subtask = {
+    id: crypto.randomUUID(),
+    title: input.title.trim(),
+    assigneeId,
+    assigneeName,
+    expectedDate: input.expectedDate
+      ? new Date(input.expectedDate).toISOString()
+      : null,
+    status: "todo",
+    createdAt: now(),
+    completedAt: null,
+  };
+  task.subtasks.push(sub);
+  task.activity.push(activity(actor, `added subtask "${sub.title}"`));
+  task.updatedAt = now();
+  await saveTask(task);
+  return toDTO(task);
+}
+
+export async function updateSubtask(
+  actor: SessionUser,
+  taskId: string,
+  subId: string,
+  input: UpdateSubtaskInput
+): Promise<TaskDTO> {
+  const task = await rawById(taskId);
+  if (!task) throw new AppError("Task not found.", 404);
+  const sub = task.subtasks.find((s) => s.id === subId);
+  if (!sub) throw new AppError("Subtask not found.", 404);
+
+  const manager = canEdit(actor, task);
+  const isSubAssignee = sub.assigneeId === actor.id;
+
+  // Status can be changed by the subtask's assignee or a manager.
+  if (input.status !== undefined) {
+    if (!manager && !isSubAssignee) {
+      throw new AppError("You cannot update this subtask.", 403);
+    }
+    sub.status = input.status;
+    sub.completedAt = input.status === "done" ? now() : null;
+    task.activity.push(
+      activity(actor, `marked subtask "${sub.title}" as ${input.status}`)
+    );
+  }
+
+  // Title / assignee / expected date are manager-only.
+  const wantsMeta =
+    input.title !== undefined ||
+    input.assigneeId !== undefined ||
+    input.expectedDate !== undefined;
+  if (wantsMeta) {
+    if (!manager) {
+      throw new AppError("Only the task owner can edit subtask details.", 403);
+    }
+    if (input.title !== undefined) sub.title = input.title.trim();
+    if (input.expectedDate !== undefined) {
+      sub.expectedDate = input.expectedDate
+        ? new Date(input.expectedDate).toISOString()
+        : null;
+    }
+    if (input.assigneeId !== undefined) {
+      if (input.assigneeId === "") {
+        sub.assigneeId = null;
+        sub.assigneeName = "";
+      } else {
+        const visible = await listVisibleUsers(actor);
+        const u = visible.find((x) => x.id === input.assigneeId);
+        if (!u) throw new AppError("You cannot assign to that person.", 403);
+        sub.assigneeId = u.id;
+        sub.assigneeName = u.name;
+      }
+    }
+  }
+
+  task.updatedAt = now();
+  await saveTask(task);
+  return toDTO(task);
+}
+
+export async function deleteSubtask(
+  actor: SessionUser,
+  taskId: string,
+  subId: string
+): Promise<TaskDTO> {
+  const task = await rawById(taskId);
+  if (!task) throw new AppError("Task not found.", 404);
+  if (!canEdit(actor, task)) {
+    throw new AppError("Only the task owner can delete subtasks.", 403);
+  }
+  task.subtasks = task.subtasks.filter((s) => s.id !== subId);
   task.updatedAt = now();
   await saveTask(task);
   return toDTO(task);
@@ -367,7 +509,7 @@ export async function transitionTask(
       id: crypto.randomUUID(),
       authorId: actor.id,
       authorName: actor.name,
-      text: text.trim(),
+      text: cleanHtml(text),
       kind,
       createdAt: now(),
     });

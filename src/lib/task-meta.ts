@@ -79,6 +79,30 @@ export const PRIORITY_META: Record<
   },
 };
 
+// ── Subtasks (one level deep) ──────────────────────────────────────
+export const SUBTASK_STATUSES = ["todo", "in_progress", "done"] as const;
+export type SubtaskStatus = (typeof SUBTASK_STATUSES)[number];
+
+export const SUBTASK_STATUS_META: Record<
+  SubtaskStatus,
+  { label: string; badgeClass: string }
+> = {
+  todo: {
+    label: "To do",
+    badgeClass: "border-border bg-muted text-muted-foreground",
+  },
+  in_progress: {
+    label: "In progress",
+    badgeClass:
+      "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  },
+  done: {
+    label: "Done",
+    badgeClass:
+      "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  },
+};
+
 /** Workflow actions a user can take on a task. */
 export type TaskAction = "accept" | "start" | "submit" | "approve" | "reject";
 

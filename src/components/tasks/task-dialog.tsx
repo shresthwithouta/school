@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, Loader2, Search } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import {
   Dialog,
@@ -23,17 +23,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { RichTextEditor } from "@/components/rich-text";
+import { UserCombobox, type AssignableUser } from "@/components/tasks/user-combobox";
 import { createTaskSchema } from "@/lib/validation";
 import { TASK_PRIORITIES, PRIORITY_META } from "@/lib/task-meta";
-import { cn, getInitials } from "@/lib/utils";
 import type { TaskDTO } from "@/lib/tasks";
 
-export type AssignableUser = { id: string; name: string; role: string };
+export type { AssignableUser };
 
 const fieldsSchema = createTaskSchema.omit({ assigneeIds: true });
 type FieldValues = {
@@ -58,7 +57,6 @@ export function TaskDialog({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>(
     task ? task.assignees.map((a) => a.id) : [currentUserId]
   );
@@ -82,20 +80,7 @@ export function TaskDialog({
   });
 
   const priority = useWatch({ control, name: "priority" });
-
-  const filteredPeople = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return assignees;
-    return assignees.filter((u) =>
-      `${u.name} ${u.role}`.toLowerCase().includes(q)
-    );
-  }, [assignees, query]);
-
-  function toggle(id: string) {
-    setSelected((s) =>
-      s.includes(id) ? s.filter((x) => x !== id) : [...s, id]
-    );
-  }
+  const description = useWatch({ control, name: "description" });
 
   async function onSubmit(values: FieldValues) {
     if (selected.length === 0) {
@@ -150,12 +135,13 @@ export function TaskDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="description">Description</Label>
-              <Textarea
-                id="description"
-                rows={3}
+              <Label>Description</Label>
+              <RichTextEditor
+                value={description ?? ""}
+                onChange={(html) =>
+                  setValue("description", html, { shouldDirty: true })
+                }
                 placeholder="What needs to be done?"
-                {...register("description")}
               />
             </div>
 
@@ -166,64 +152,13 @@ export function TaskDialog({
                   ({selected.length} selected)
                 </span>
               </Label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search people…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  className="pl-9"
-                />
-              </div>
-              <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border p-1">
-                {filteredPeople.length === 0 ? (
-                  <p className="p-3 text-center text-sm text-muted-foreground">
-                    No one to assign.
-                  </p>
-                ) : (
-                  filteredPeople.map((u) => {
-                    const checked = selected.includes(u.id);
-                    return (
-                      <button
-                        key={u.id}
-                        type="button"
-                        onClick={() => toggle(u.id)}
-                        className={cn(
-                          "flex w-full items-center gap-3 rounded-md p-2 text-left transition-colors hover:bg-accent",
-                          checked && "bg-accent"
-                        )}
-                      >
-                        <Avatar className="size-7">
-                          <AvatarFallback className="bg-primary/10 text-xs text-primary">
-                            {getInitials(u.name)}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium">
-                            {u.name}
-                            {u.id === currentUserId && (
-                              <span className="text-muted-foreground"> (you)</span>
-                            )}
-                          </p>
-                          <p className="truncate text-xs text-muted-foreground">
-                            {u.role}
-                          </p>
-                        </div>
-                        <span
-                          className={cn(
-                            "flex size-5 shrink-0 items-center justify-center rounded-full border",
-                            checked
-                              ? "border-primary bg-primary text-primary-foreground"
-                              : "border-input"
-                          )}
-                        >
-                          {checked && <Check className="size-3.5" />}
-                        </span>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
+              <UserCombobox
+                users={assignees}
+                value={selected}
+                onChange={setSelected}
+                currentUserId={currentUserId}
+                placeholder="Type a name to add…"
+              />
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">

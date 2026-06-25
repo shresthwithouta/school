@@ -5,6 +5,19 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/** Strips HTML tags to a plain-text string (for previews/excerpts). */
+export function toPlainText(html?: string | null): string {
+  if (!html) return ""
+  return html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
 /** Up to two uppercase initials from a person's name (falls back to "?"). */
 export function getInitials(name?: string | null): string {
   if (!name) return "?"

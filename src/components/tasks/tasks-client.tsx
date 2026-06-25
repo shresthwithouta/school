@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { Search, Plus, CalendarDays, Inbox } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -16,9 +17,8 @@ import {
 } from "@/components/ui/select";
 import { StatusBadge, PriorityBadge } from "@/components/tasks/task-badges";
 import { TaskDialog, type AssignableUser } from "@/components/tasks/task-dialog";
-import { TaskDetail } from "@/components/tasks/task-detail";
 import { TASK_STATUSES, STATUS_META } from "@/lib/task-meta";
-import { cn, formatDate, getInitials } from "@/lib/utils";
+import { cn, formatDate, getInitials, toPlainText } from "@/lib/utils";
 import type { TaskDTO } from "@/lib/tasks";
 
 type CurrentUser = { id: string; role: string; tier: string };
@@ -56,7 +56,6 @@ export function TasksClient({
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<"all" | "mine" | "assigned">("all");
   const [status, setStatus] = useState<string>("all");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -67,7 +66,12 @@ export function TasksClient({
       if (status !== "all" && t.status !== status) return false;
       if (
         q &&
-        ![t.title, t.description, t.assignerName, ...t.assignees.map((a) => a.name)]
+        ![
+          t.title,
+          toPlainText(t.description),
+          t.assignerName,
+          ...t.assignees.map((a) => a.name),
+        ]
           .filter(Boolean)
           .some((v) => v.toLowerCase().includes(q))
       )
@@ -75,8 +79,6 @@ export function TasksClient({
       return true;
     });
   }, [tasks, query, scope, status, currentUser.id]);
-
-  const selected = tasks.find((t) => t.id === selectedId) ?? null;
 
   return (
     <div className="space-y-4">
@@ -145,10 +147,10 @@ export function TasksClient({
       ) : (
         <div className="grid gap-3">
           {filtered.map((t) => (
-            <button
+            <Link
               key={t.id}
-              onClick={() => setSelectedId(t.id)}
-              className="w-full rounded-xl border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-accent/40"
+              href={`/tasks/${t.id}`}
+              className="block w-full rounded-xl border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-accent/40"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
@@ -159,7 +161,7 @@ export function TasksClient({
                   <h3 className="mt-2 truncate font-medium">{t.title}</h3>
                   {t.description && (
                     <p className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">
-                      {t.description}
+                      {toPlainText(t.description)}
                     </p>
                   )}
                 </div>
@@ -186,18 +188,10 @@ export function TasksClient({
                   </span>
                 )}
               </div>
-            </button>
+            </Link>
           ))}
         </div>
       )}
-
-      <TaskDetail
-        task={selected}
-        open={!!selectedId}
-        onOpenChange={(v) => !v && setSelectedId(null)}
-        currentUser={currentUser}
-        assignees={assignees}
-      />
     </div>
   );
 }
