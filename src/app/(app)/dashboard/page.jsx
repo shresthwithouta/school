@@ -81,7 +81,7 @@ export default async function DashboardPage() {
           <h2 className="text-2xl font-semibold tracking-tight">
             {greeting()}, {firstName}
           </h2>
-          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <div className="hidden flex-wrap items-center gap-2 text-sm text-muted-foreground sm:flex">
             <span>{user.role}</span>
             <span aria-hidden>•</span>
             <TierBadge role={user.role} />
