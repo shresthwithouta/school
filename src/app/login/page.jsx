@@ -65,12 +65,16 @@ export default async function LoginPage() {
 
         <div className="relative max-w-md space-y-8">
           <div className="space-y-3">
+            <p className="text-sm font-medium uppercase tracking-wide text-primary-foreground/60">
+              Internal staff tool
+            </p>
             <h1 className="text-3xl font-semibold leading-tight tracking-tight">
-              Run your school&apos;s operations with clarity and accountability.
+              The operations workspace for your school&apos;s staff.
             </h1>
             <p className="text-primary-foreground/80">
-              One platform for tasks, meetings, events and performance — across
-              every role, from the Chairman to every team member.
+              Assign and track tasks, run meetings, and review performance —
+              organised by role, from the Director down to every team member.
+              For staff use only; accounts are issued by an administrator.
             </p>
           </div>
 
@@ -90,7 +94,8 @@ export default async function LoginPage() {
         </div>
 
         <p className="relative text-sm text-primary-foreground/60">
-          © {new Date().getFullYear()} SWM Platform. All rights reserved.
+          Private staff tool · access by invitation only · ©{" "}
+          {new Date().getFullYear()} SWM Platform
         </p>
       </div>
 
@@ -117,10 +122,11 @@ export default async function LoginPage() {
 
             <div className="space-y-1.5">
               <h2 className="text-2xl font-semibold tracking-tight">
-                Welcome back
+                Staff sign in
               </h2>
               <p className="text-sm text-muted-foreground">
-                Sign in with the credentials provided by your administrator.
+                Sign in to your school&apos;s staff operations tool with the
+                credentials issued by your administrator.
               </p>
             </div>
 
