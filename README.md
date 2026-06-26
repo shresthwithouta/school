@@ -23,7 +23,7 @@ calendar, approvals and the AI features are still "coming soon"
 
 - Node.js 20+
 - A MongoDB database — a free [Atlas](https://www.mongodb.com/atlas) cluster or a
-  local `mongod`.
+  local `mongod`
 
 ## Getting started
 
