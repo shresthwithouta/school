@@ -37,12 +37,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge, PriorityBadge } from "@/components/tasks/task-badges";
 import { StatusSelect } from "@/components/tasks/status-select";
 import { TaskDialog } from "@/components/tasks/task-dialog";
+import { SubtaskDialog } from "@/components/tasks/subtask-dialog";
 import { UserCombobox } from "@/components/tasks/user-combobox";
 import { CommentThread } from "@/components/tasks/comment-thread";
 import { RichText } from "@/components/rich-text";
 import { AttachmentList, AttachmentUploader } from "@/components/attachments";
 import { SUBTASK_STATUS_META } from "@/lib/task-meta";
-import { cn, formatDate, formatDateTime, getInitials } from "@/lib/utils";
+import {
+  cn,
+  formatDate,
+  formatDateTime,
+  formatDateMaybeTime,
+  getInitials,
+} from "@/lib/utils";
 
 export function TaskPageClient({ task, assignees, currentUser }) {
   const router = useRouter();
@@ -245,10 +252,10 @@ export function TaskPageClient({ task, assignees, currentUser }) {
               )}
               <ul className="space-y-2">
                 {task.subtasks.map((s) => (
-                  <li key={s.id}>
+                  <li key={s.id} className="flex items-center gap-1.5">
                     <Link
                       href={`/tasks/${task.key}/${s.key}`}
-                      className="flex items-center gap-3 rounded-lg border p-2.5 transition-colors hover:border-primary/40 hover:bg-accent/40"
+                      className="flex min-w-0 flex-1 items-center gap-3 rounded-lg border p-2.5 transition-colors hover:border-primary/40 hover:bg-accent/40"
                     >
                       <span className="font-mono text-xs text-muted-foreground">
                         {s.key}
@@ -276,6 +283,24 @@ export function TaskPageClient({ task, assignees, currentUser }) {
                       </Badge>
                       <ChevronRight className="size-4 text-muted-foreground" />
                     </Link>
+                    {involved && (
+                      <SubtaskDialog
+                        task={{ id: task.id, key: task.key }}
+                        sub={s}
+                        assignees={assignees}
+                        currentUserId={currentUser.id}
+                        trigger={
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Edit subtask"
+                            className="size-9 shrink-0 text-muted-foreground hover:text-foreground"
+                          >
+                            <Pencil className="size-4" />
+                          </Button>
+                        }
+                      />
+                    )}
                   </li>
                 ))}
               </ul>
@@ -362,7 +387,7 @@ export function TaskPageClient({ task, assignees, currentUser }) {
               <Detail label="Assigned by" value={task.assignerName} sub={task.assignerRole} />
               <Detail
                 label="Due date"
-                value={task.dueDate ? formatDate(task.dueDate) : "—"}
+                value={task.dueDate ? formatDateMaybeTime(task.dueDate) : "—"}
                 danger={task.delayed}
                 sub={
                   task.delayed && task.daysLate > 0

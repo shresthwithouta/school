@@ -29,8 +29,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DateTimePicker } from "@/components/ui/date-time-picker";
 import { PriorityBadge } from "@/components/tasks/task-badges";
 import { RichText, RichTextEditor } from "@/components/rich-text";
+import { formatDateMaybeTime } from "@/lib/utils";
 import {
   SUBTASK_STATUSES,
   SUBTASK_STATUS_META,
@@ -289,15 +291,15 @@ export function SubtaskPageClient({ task, sub, assignees, canEdit, canDelete, cu
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Expected date</Label>
               {canEdit ? (
-                <Input
-                  type="date"
-                  defaultValue={sub.expectedDate ? sub.expectedDate.slice(0, 10) : ""}
-                  onChange={(e) => patch({ expectedDate: e.target.value })}
+                <DateTimePicker
+                  value={sub.expectedDate ?? ""}
+                  onChange={(v) => patch({ expectedDate: v })}
+                  placeholder="No date set"
                   disabled={busy}
                 />
               ) : (
                 <p className="font-medium">
-                  {sub.expectedDate ? sub.expectedDate.slice(0, 10) : "—"}
+                  {formatDateMaybeTime(sub.expectedDate)}
                 </p>
               )}
             </div>

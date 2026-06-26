@@ -7,6 +7,7 @@ import {
   ChevronRight,
   CalendarClock,
   ListChecks,
+  GitBranch,
   CalendarOff,
 } from "lucide-react";
 
@@ -14,7 +15,9 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn, formatDateTime } from "@/lib/utils";
 
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+// Sunday-first week to match the OS/browser date pickers people are used to.
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKDAYS_NARROW = ["S", "M", "T", "W", "T", "F", "S"];
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
@@ -30,7 +33,7 @@ const KIND_STYLES = {
       "bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300",
   },
   taskOpen: {
-    label: "Tasks due",
+    label: "Due",
     dot: "bg-amber-500",
     chip:
       "bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300",
@@ -60,10 +63,10 @@ function sameDay(a, b) {
   return dayKey(a) === dayKey(b);
 }
 
-// 6×7 day matrix for the month containing `cursor`, week starting Monday.
+// 6×7 day matrix for the month containing `cursor`, week starting Sunday.
 function buildMatrix(cursor) {
   const first = startOfMonth(cursor);
-  const lead = (first.getDay() + 6) % 7; // days before the 1st (Mon = 0)
+  const lead = first.getDay(); // days before the 1st (Sun = 0)
   const start = new Date(first);
   start.setDate(first.getDate() - lead);
   return Array.from({ length: 42 }, (_, i) => {
@@ -80,15 +83,34 @@ function eventKind(ev) {
   return "taskOpen";
 }
 
+function eventIcon(ev) {
+  if (ev.type === "meeting") return CalendarClock;
+  if (ev.type === "subtask") return GitBranch;
+  return ListChecks;
+}
+
 export function CalendarClient({ events }) {
   const today = useMemo(() => new Date(), []);
   const [cursor, setCursor] = useState(() => startOfMonth(today));
   const [view, setView] = useState("month");
+  const [selectedDay, setSelectedDay] = useState(() => today);
+
+  // Default to "my schedule" when the user has anything of their own; managers
+  // who mostly see other people's work fall back to "all" so it's never empty.
+  const hasMine = useMemo(() => events.some((e) => e.mine), [events]);
+  const [scope, setScope] = useState(() =>
+    events.some((e) => e.mine) ? "mine" : "all"
+  );
+
+  const scoped = useMemo(
+    () => (scope === "mine" ? events.filter((e) => e.mine) : events),
+    [events, scope]
+  );
 
   // Bucket events by calendar day, each bucket sorted by time.
   const byDay = useMemo(() => {
     const map = new Map();
-    for (const ev of events) {
+    for (const ev of scoped) {
       const d = new Date(ev.date);
       if (Number.isNaN(d.getTime())) continue;
       const k = dayKey(d);
@@ -99,7 +121,7 @@ export function CalendarClient({ events }) {
       list.sort((a, b) => a._date - b._date);
     }
     return map;
-  }, [events]);
+  }, [scoped]);
 
   const days = useMemo(() => buildMatrix(cursor), [cursor]);
 
@@ -109,22 +131,38 @@ export function CalendarClient({ events }) {
       today.getMonth(),
       today.getDate()
     ).getTime();
-    return events
+    return scoped
       .map((ev) => ({ ...ev, _date: new Date(ev.date) }))
-      .filter((ev) => !Number.isNaN(ev._date.getTime()) && ev._date.getTime() >= startMs)
+      .filter(
+        (ev) => !Number.isNaN(ev._date.getTime()) && ev._date.getTime() >= startMs
+      )
       .sort((a, b) => a._date - b._date)
-      .slice(0, 40);
-  }, [events, today]);
+      .slice(0, 60);
+  }, [scoped, today]);
+
+  const selectedEvents = byDay.get(dayKey(selectedDay)) || [];
 
   const goMonth = (delta) =>
     setCursor((c) => new Date(c.getFullYear(), c.getMonth() + delta, 1));
+
+  function selectDay(d) {
+    setSelectedDay(d);
+    if (d.getMonth() !== cursor.getMonth() || d.getFullYear() !== cursor.getFullYear()) {
+      setCursor(startOfMonth(d));
+    }
+  }
+
+  function goToday() {
+    setCursor(startOfMonth(today));
+    setSelectedDay(today);
+  }
 
   return (
     <div className="space-y-4">
       {/* Toolbar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
-          <h2 className="min-w-[10.5rem] text-lg font-semibold tracking-tight">
+          <h2 className="min-w-32 text-base font-semibold tracking-tight sm:min-w-42 sm:text-lg">
             {MONTHS[cursor.getMonth()]}{" "}
             <span className="text-muted-foreground">{cursor.getFullYear()}</span>
           </h2>
@@ -147,19 +185,26 @@ export function CalendarClient({ events }) {
             >
               <ChevronRight className="size-4" />
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8"
-              onClick={() => setCursor(startOfMonth(today))}
-            >
+            <Button variant="outline" size="sm" className="h-8" onClick={goToday}>
               Today
             </Button>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <Legend />
+          {hasMine && (
+            <Tabs value={scope} onValueChange={setScope}>
+              <TabsList className="h-8">
+                <TabsTrigger value="mine" className="text-xs">
+                  Mine
+                </TabsTrigger>
+                <TabsTrigger value="all" className="text-xs">
+                  All
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
           <Tabs value={view} onValueChange={setView}>
             <TabsList className="h-8">
               <TabsTrigger value="month" className="text-xs">
@@ -174,12 +219,17 @@ export function CalendarClient({ events }) {
       </div>
 
       {view === "month" ? (
-        <MonthGrid
-          days={days}
-          cursor={cursor}
-          today={today}
-          byDay={byDay}
-        />
+        <div className="space-y-4">
+          <MonthGrid
+            days={days}
+            cursor={cursor}
+            today={today}
+            byDay={byDay}
+            selectedDay={selectedDay}
+            onSelectDay={selectDay}
+          />
+          <DayDetail date={selectedDay} items={selectedEvents} today={today} />
+        </div>
       ) : (
         <AgendaList items={upcoming} today={today} />
       )}
@@ -189,7 +239,7 @@ export function CalendarClient({ events }) {
 
 function Legend() {
   return (
-    <div className="hidden items-center gap-3 text-xs text-muted-foreground md:flex">
+    <div className="hidden items-center gap-3 text-xs text-muted-foreground lg:flex">
       {Object.values(KIND_STYLES).map((s) => (
         <span key={s.label} className="inline-flex items-center gap-1.5">
           <span className={cn("size-2 rounded-full", s.dot)} />
@@ -200,17 +250,18 @@ function Legend() {
   );
 }
 
-function MonthGrid({ days, cursor, today, byDay }) {
+function MonthGrid({ days, cursor, today, byDay, selectedDay, onSelectDay }) {
   return (
     <div className="overflow-hidden rounded-xl border bg-card">
       {/* Weekday header */}
       <div className="grid grid-cols-7 border-b bg-muted/40">
-        {WEEKDAYS.map((w) => (
+        {WEEKDAYS.map((w, i) => (
           <div
-            key={w}
-            className="px-2 py-2 text-center text-xs font-medium text-muted-foreground"
+            key={i}
+            className="px-1 py-2 text-center text-[11px] font-medium text-muted-foreground sm:text-xs"
           >
-            {w}
+            <span className="sm:hidden">{WEEKDAYS_NARROW[i]}</span>
+            <span className="hidden sm:inline">{w}</span>
           </div>
         ))}
       </div>
@@ -220,6 +271,7 @@ function MonthGrid({ days, cursor, today, byDay }) {
         {days.map((d, i) => {
           const inMonth = d.getMonth() === cursor.getMonth();
           const isToday = sameDay(d, today);
+          const isSelected = sameDay(d, selectedDay);
           const list = byDay.get(dayKey(d)) || [];
           const shown = list.slice(0, 3);
           const extra = list.length - shown.length;
@@ -227,14 +279,27 @@ function MonthGrid({ days, cursor, today, byDay }) {
           return (
             <div
               key={i}
+              role="button"
+              tabIndex={0}
+              aria-label={d.toDateString()}
+              aria-pressed={isSelected}
+              onClick={() => onSelectDay(d)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelectDay(d);
+                }
+              }}
               className={cn(
-                "min-h-[6.5rem] border-b border-r p-1.5 transition-colors last:border-r-0",
+                "flex min-h-14 cursor-pointer flex-col border-b border-r p-1 outline-none transition-colors last:border-r-0 sm:min-h-26 sm:p-1.5",
                 (i + 1) % 7 === 0 && "border-r-0",
                 i >= 35 && "border-b-0",
-                inMonth ? "bg-card hover:bg-accent/30" : "bg-muted/20"
+                inMonth ? "bg-card hover:bg-accent/40" : "bg-muted/20",
+                isSelected && "ring-2 ring-inset ring-primary/60",
+                "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               )}
             >
-              <div className="mb-1 flex justify-end">
+              <div className="mb-0.5 flex justify-end sm:mb-1">
                 <span
                   className={cn(
                     "flex size-6 items-center justify-center rounded-full text-xs",
@@ -249,7 +314,26 @@ function MonthGrid({ days, cursor, today, byDay }) {
                 </span>
               </div>
 
-              <div className="space-y-1">
+              {/* Mobile: compact dots */}
+              <div className="mt-auto flex min-h-3 flex-wrap items-center gap-1 sm:hidden">
+                {shown.map((ev) => (
+                  <span
+                    key={ev.id}
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      KIND_STYLES[eventKind(ev)].dot
+                    )}
+                  />
+                ))}
+                {extra > 0 && (
+                  <span className="text-[9px] font-medium leading-none text-muted-foreground">
+                    +{extra}
+                  </span>
+                )}
+              </div>
+
+              {/* Desktop: text chips */}
+              <div className="hidden space-y-1 sm:block">
                 {shown.map((ev) => (
                   <EventChip key={ev.id} ev={ev} />
                 ))}
@@ -272,7 +356,8 @@ function EventChip({ ev }) {
   return (
     <Link
       href={ev.href}
-      title={ev.title}
+      title={ev.subtitle ? `${ev.title} · ${ev.subtitle}` : ev.title}
+      onClick={(e) => e.stopPropagation()}
       className={cn(
         "flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-medium leading-tight transition-colors",
         style.chip
@@ -281,6 +366,77 @@ function EventChip({ ev }) {
       <span className={cn("size-1.5 shrink-0 rounded-full", style.dot)} />
       <span className="truncate">{ev.title}</span>
     </Link>
+  );
+}
+
+// Focused view of a single day's events — the primary way to read the calendar
+// on a phone, and a handy detail panel on desktop.
+function DayDetail({ date, items, today }) {
+  const isToday = sameDay(date, today);
+  return (
+    <div className="overflow-hidden rounded-xl border bg-card">
+      <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-2.5">
+        <span className="text-sm font-semibold">
+          {date.toLocaleDateString("en-GB", {
+            weekday: "long",
+            day: "2-digit",
+            month: "long",
+          })}
+        </span>
+        {isToday && (
+          <span className="rounded-full bg-foreground px-1.5 py-0.5 text-[10px] font-semibold text-background">
+            Today
+          </span>
+        )}
+        <span className="ml-auto text-xs text-muted-foreground">
+          {items.length} item{items.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      {items.length === 0 ? (
+        <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+          Nothing scheduled on this day.
+        </p>
+      ) : (
+        <ul className="divide-y">
+          {items.map((ev) => {
+            const style = KIND_STYLES[eventKind(ev)];
+            const Icon = eventIcon(ev);
+            return (
+              <li key={ev.id}>
+                <Link
+                  href={ev.href}
+                  className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-accent/40"
+                >
+                  <span
+                    className={cn("size-2 shrink-0 rounded-full", style.dot)}
+                  />
+                  <Icon className="size-4 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className={cn(
+                        "truncate text-sm font-medium",
+                        ev.done &&
+                          "text-muted-foreground line-through decoration-muted-foreground/40"
+                      )}
+                    >
+                      {ev.title}
+                    </p>
+                    {ev.subtitle && (
+                      <p className="truncate text-xs text-muted-foreground">
+                        {ev.subtitle}
+                      </p>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {formatDateTime(ev._date)}
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -334,7 +490,7 @@ function AgendaList({ items, today }) {
             <div className="divide-y">
               {g.items.map((ev) => {
                 const style = KIND_STYLES[eventKind(ev)];
-                const Icon = ev.type === "meeting" ? CalendarClock : ListChecks;
+                const Icon = eventIcon(ev);
                 return (
                   <Link
                     key={ev.id}
@@ -343,9 +499,22 @@ function AgendaList({ items, today }) {
                   >
                     <span className={cn("size-2 shrink-0 rounded-full", style.dot)} />
                     <Icon className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                      {ev.title}
-                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className={cn(
+                          "truncate text-sm font-medium",
+                          ev.done &&
+                            "text-muted-foreground line-through decoration-muted-foreground/40"
+                        )}
+                      >
+                        {ev.title}
+                      </p>
+                      {ev.subtitle && (
+                        <p className="truncate text-xs text-muted-foreground">
+                          {ev.subtitle}
+                        </p>
+                      )}
+                    </div>
                     <span className="shrink-0 text-xs text-muted-foreground">
                       {formatDateTime(ev._date)}
                     </span>

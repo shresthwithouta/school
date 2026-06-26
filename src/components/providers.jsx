@@ -13,7 +13,7 @@ export function Providers({ children }) {
       disableTransitionOnChange
     >
       <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
-      <Toaster richColors closeButton position="top-right" />
+      <Toaster closeButton position="top-right" />
     </ThemeProvider>
   );
 }

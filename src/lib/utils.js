@@ -47,6 +47,23 @@ export function formatDate(date) {
   })
 }
 
+/** "12 Jun 2026" — and ", 14:30" appended only when the value carries a time. */
+export function formatDateMaybeTime(date) {
+  if (!date) return "—"
+  const d = typeof date === "string" ? new Date(date) : date
+  if (Number.isNaN(d.getTime())) return "—"
+  const day = d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  })
+  if (d.getHours() === 0 && d.getMinutes() === 0) return day
+  return `${day}, ${d.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`
+}
+
 /** "12 Jun, 14:30" style date+time, safe for null/undefined. */
 export function formatDateTime(date) {
   if (!date) return "—"

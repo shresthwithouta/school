@@ -28,84 +28,55 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DateTimePicker } from "@/components/ui/date-time-picker";
 import { RichTextEditor } from "@/components/rich-text";
-import { UserCombobox, } from "@/components/tasks/user-combobox";
-import { createTaskSchema } from "@/lib/validation";
+import { UserCombobox } from "@/components/tasks/user-combobox";
+import { createSubtaskSchema } from "@/lib/validation";
 import { TASK_PRIORITIES, PRIORITY_META } from "@/lib/task-meta";
 
+// Assignee is handled with its own state (single-select), so omit it here.
+const fieldsSchema = createSubtaskSchema.omit({ assigneeId: true });
 
-;
-
-const fieldsSchema = createTaskSchema.omit({ assigneeIds: true });
-
-
-
-
-
-
-
-export function TaskDialog({
-  mode,
-  task,
-  assignees,
-  currentUserId,
-  trigger,
-}
-
-
-
-
-
-) {
+// Edit a subtask in a modal — the same affordance tasks get via TaskDialog, so
+// you can tweak a subtask without leaving the task page. Mirrors the subtask
+// create form's fields and posts to the subtask PATCH endpoint.
+export function SubtaskDialog({ task, sub, assignees, currentUserId, trigger }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState(
-    task ? task.assignees.map((a) => a.id) : [currentUserId]
-  );
+  // Single assignee, held as a 0-or-1 array so we can reuse UserCombobox.
+  const [assignee, setAssignee] = useState(sub.assigneeId ? [sub.assigneeId] : []);
 
   const {
     register,
     handleSubmit,
-    reset,
     setValue,
     control,
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(fieldsSchema),
     defaultValues: {
-      title: task?.title ?? "",
-      description: task?.description ?? "",
-      priority: task?.priority ?? "medium",
-      dueDate: task?.dueDate ?? "",
+      title: sub.title ?? "",
+      description: sub.description ?? "",
+      priority: sub.priority ?? "medium",
+      expectedDate: sub.expectedDate ?? "",
     },
   });
 
   const priority = useWatch({ control, name: "priority" });
   const description = useWatch({ control, name: "description" });
-  const dueDate = useWatch({ control, name: "dueDate" });
+  const expectedDate = useWatch({ control, name: "expectedDate" });
 
   async function onSubmit(values) {
-    if (selected.length === 0) {
-      toast.error("Choose at least one person to assign.");
-      return;
-    }
-    const url = mode === "create" ? "/api/tasks" : `/api/tasks/${task.id}`;
-    const method = mode === "create" ? "POST" : "PATCH";
-    const res = await fetch(url, {
-      method,
+    const res = await fetch(`/api/tasks/${task.id}/subtasks/${sub.id}`, {
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...values, assigneeIds: selected }),
+      body: JSON.stringify({ ...values, assigneeId: assignee[0] ?? "" }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      toast.error(data.error ?? "Could not save task");
+      toast.error(data.error ?? "Could not save subtask");
       return;
     }
-    toast.success(mode === "create" ? "Task created" : "Task updated");
+    toast.success("Subtask updated");
     setOpen(false);
-    if (mode === "create") {
-      reset();
-      setSelected([currentUserId]);
-    }
     router.refresh();
   }
 
@@ -114,12 +85,8 @@ export function TaskDialog({
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent className="flex max-h-[92dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
         <DialogHeader className="border-b p-4 sm:p-6">
-          <DialogTitle>{mode === "create" ? "New task" : "Edit task"}</DialogTitle>
-          <DialogDescription>
-            {mode === "create"
-              ? "Assign work to one or more people with a deadline and priority."
-              : "Update this task's details."}
-          </DialogDescription>
+          <DialogTitle>Edit subtask</DialogTitle>
+          <DialogDescription>Update this subtask&apos;s details.</DialogDescription>
         </DialogHeader>
 
         <form
@@ -128,8 +95,12 @@ export function TaskDialog({
         >
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
             <div className="space-y-2">
-              <Label htmlFor="title">Title</Label>
-              <Input id="title" {...register("title")} aria-invalid={!!errors.title} />
+              <Label htmlFor="sub-title">Title</Label>
+              <Input
+                id="sub-title"
+                {...register("title")}
+                aria-invalid={!!errors.title}
+              />
               {errors.title && (
                 <p className="text-sm text-destructive">{errors.title.message}</p>
               )}
@@ -142,34 +113,35 @@ export function TaskDialog({
                 onChange={(html) =>
                   setValue("description", html, { shouldDirty: true })
                 }
-                placeholder="What needs to be done?"
+                placeholder="Add details, context or steps…"
               />
             </div>
 
             <div className="space-y-2">
-              <Label>
-                Assign to{" "}
-                <span className="text-muted-foreground">
-                  ({selected.length} selected)
-                </span>
-              </Label>
+              <Label>Assignee</Label>
               <UserCombobox
                 users={assignees}
-                value={selected}
-                onChange={setSelected}
+                value={assignee}
+                onChange={setAssignee}
                 currentUserId={currentUserId}
-                placeholder="Type a name to add…"
+                placeholder="Search a name…"
+                single
               />
+              {assignee.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Unassigned — search to assign someone.
+                </p>
+              )}
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="priority">Priority</Label>
+                <Label htmlFor="sub-priority">Priority</Label>
                 <Select
                   value={priority}
                   onValueChange={(v) => setValue("priority", v)}
                 >
-                  <SelectTrigger id="priority" className="w-full">
+                  <SelectTrigger id="sub-priority" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -182,12 +154,14 @@ export function TaskDialog({
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="dueDate">Due date</Label>
+                <Label htmlFor="sub-expected">Expected date</Label>
                 <DateTimePicker
-                  id="dueDate"
-                  value={dueDate}
-                  onChange={(v) => setValue("dueDate", v, { shouldDirty: true })}
-                  placeholder="No due date"
+                  id="sub-expected"
+                  value={expectedDate}
+                  onChange={(v) =>
+                    setValue("expectedDate", v, { shouldDirty: true })
+                  }
+                  placeholder="No date set"
                 />
               </div>
             </div>
@@ -196,7 +170,7 @@ export function TaskDialog({
           <DialogFooter className="border-t p-4 sm:p-6">
             <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto">
               {isSubmitting && <Loader2 className="size-4 animate-spin" />}
-              {mode === "create" ? "Create task" : "Save changes"}
+              Save changes
             </Button>
           </DialogFooter>
         </form>

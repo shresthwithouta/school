@@ -67,6 +67,10 @@ export function taskUrl(taskId) {
   return `${baseUrl()}/tasks/${taskId}`;
 }
 
+export function subtaskUrl(taskId, subKey) {
+  return `${baseUrl()}/tasks/${taskId}/${subKey}`;
+}
+
 export function meetingUrl(meetingId) {
   return `${baseUrl()}/meetings/${meetingId}`;
 }
@@ -106,6 +110,19 @@ export async function emailTaskAssigned(args
       "You've been added to a task",
       `Hi ${args.assigneeName}, <strong>${args.assignerName}</strong> assigned you to the task <strong>${args.taskTitle}</strong>. Open it to get started.`,
       { label: "Open task", href: taskUrl(args.taskId) }
+    ),
+  });
+}
+
+export async function emailSubtaskAssigned(args
+) {
+  await sendEmail({
+    to: args.to,
+    subject: `You've been assigned a subtask: ${args.subtaskTitle}`,
+    html: layout(
+      "You've been assigned a subtask",
+      `Hi ${args.assigneeName}, <strong>${args.assignerName}</strong> assigned you the subtask <strong>${args.subtaskTitle}</strong> under the task <strong>${args.taskTitle}</strong>. Open it to get started.`,
+      { label: "Open subtask", href: subtaskUrl(args.taskId, args.subtaskKey) }
     ),
   });
 }

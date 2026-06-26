@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { DateTimePicker } from "@/components/ui/date-time-picker";
 import { RichTextEditor } from "@/components/rich-text";
 import { UserCombobox } from "@/components/tasks/user-combobox";
 import { TASK_PRIORITIES, PRIORITY_META } from "@/lib/task-meta";
@@ -155,11 +156,11 @@ export function SubtaskCreateForm({ task, assignees, currentUserId }) {
 
               <div className="space-y-2">
                 <Label htmlFor="expectedDate">Expected date</Label>
-                <Input
+                <DateTimePicker
                   id="expectedDate"
-                  type="date"
                   value={expectedDate}
-                  onChange={(e) => setExpectedDate(e.target.value)}
+                  onChange={setExpectedDate}
+                  placeholder="No date set"
                 />
               </div>
             </CardContent>

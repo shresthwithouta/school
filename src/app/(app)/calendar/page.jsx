@@ -6,18 +6,13 @@ import { CalendarClient } from "@/components/calendar/calendar-client";
 
 export const metadata = { title: "Calendar" };
 
-export default async function CalendarPage() {
-  const user = await requireUser();
-  const [tasks, meetings] = await Promise.all([
-    listVisibleTasks(user),
-    listVisibleMeetings(user),
-  ]);
-
-  // Flatten meetings, tasks and (my) subtasks into a single plain event list.
-  // Each event carries a `mine` flag — true when it's assigned to / created by
-  // the current user — so the client can default to "my schedule" and still let
-  // managers flip to everything they can see. Clicking any event opens its page
-  // via `href`. Items without a date simply don't appear.
+// Flatten meetings, tasks and (my) subtasks into a single plain event list.
+// Each event carries a `mine` flag — true when it's assigned to / created by
+// the current user — so the client can default to "my schedule" and still let
+// managers flip to everything they can see. Clicking any event opens its page
+// via `href`. Items without a date simply don't appear. Kept out of the
+// component body so the `Date.now()` call stays in a plain function.
+function buildEvents(user, tasks, meetings) {
   const now = Date.now();
   const events = [];
 
@@ -69,6 +64,18 @@ export default async function CalendarPage() {
       });
     }
   }
+
+  return events;
+}
+
+export default async function CalendarPage() {
+  const user = await requireUser();
+  const [tasks, meetings] = await Promise.all([
+    listVisibleTasks(user),
+    listVisibleMeetings(user),
+  ]);
+
+  const events = buildEvents(user, tasks, meetings);
 
   return (
     <div className="space-y-6">

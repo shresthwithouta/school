@@ -44,7 +44,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { DateTimePicker } from "@/components/ui/date-time-picker";
 import { Textarea } from "@/components/ui/textarea";
 import { RichText, RichTextEditor } from "@/components/rich-text";
 import { AttachmentList, AttachmentUploader } from "@/components/attachments";
@@ -277,11 +277,11 @@ export function MeetingPageClient({
                     <label className="text-xs text-muted-foreground">
                       Target date
                     </label>
-                    <Input
-                      type="date"
+                    <DateTimePicker
                       value={decisionDate}
-                      onChange={(e) => setDecisionDate(e.target.value)}
-                      className="h-8 w-auto"
+                      onChange={setDecisionDate}
+                      placeholder="No target date"
+                      className="w-auto min-w-44"
                     />
                     <Button
                       size="sm"

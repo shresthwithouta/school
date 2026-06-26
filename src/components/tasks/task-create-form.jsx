@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { DateTimePicker } from "@/components/ui/date-time-picker";
 import { RichTextEditor } from "@/components/rich-text";
 import { UserCombobox } from "@/components/tasks/user-combobox";
 import { TASK_PRIORITIES, PRIORITY_META } from "@/lib/task-meta";
@@ -138,11 +139,11 @@ export function TaskCreateForm({ assignees, currentUserId }) {
 
               <div className="space-y-2">
                 <Label htmlFor="dueDate">Due date</Label>
-                <Input
+                <DateTimePicker
                   id="dueDate"
-                  type="date"
                   value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
+                  onChange={setDueDate}
+                  placeholder="No due date"
                 />
               </div>
             </CardContent>

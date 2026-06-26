@@ -5,7 +5,7 @@ import { after } from "next/server";
 import { connectToDatabase, stripMongo } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { cleanHtml } from "@/lib/sanitize";
-import { emailTaskAssigned, emailTaskCompleted } from "@/lib/email";
+import { emailTaskAssigned, emailTaskCompleted, emailSubtaskAssigned } from "@/lib/email";
 import { canManage, isOwner } from "@/lib/rbac";
 import { store } from "@/lib/store";
 import { listAssignableTaskUsers } from "@/lib/users";
@@ -734,12 +734,14 @@ export async function addSubtask(
 
   let assigneeId = null;
   let assigneeName = "";
+  let assigneeUser = null;
   if (input.assigneeId) {
     const assignable = await listAssignableTaskUsers(actor);
     const u = assignable.find((x) => x.id === input.assigneeId);
     if (!u) throw new AppError("You cannot assign to that person.", 403);
     assigneeId = u.id;
     assigneeName = u.name;
+    assigneeUser = u;
   }
 
   const seq = nextSubKeyNum(task);
@@ -763,6 +765,22 @@ export async function addSubtask(
   task.activity.push(activity(actor, `added subtask "${sub.title}"`));
   task.updatedAt = now();
   await saveTask(task);
+
+  // Notify the assignee (best-effort, after the response — never blocks the save).
+  if (assigneeUser && assigneeUser.id !== actor.id) {
+    after(() =>
+      emailSubtaskAssigned({
+        to: assigneeUser.email,
+        assigneeName: assigneeUser.name,
+        subtaskTitle: sub.title,
+        taskTitle: task.title,
+        assignerName: actor.name,
+        taskId: task.id,
+        subtaskKey: sub.key,
+      })
+    );
+  }
+
   return toDTO(task);
 }
 
@@ -779,6 +797,8 @@ export async function updateSubtask(
 
   const involved = isInvolved(actor, task);
   const isSubAssignee = sub.assigneeId === actor.id;
+  // Set when the assignee is changed to someone new, so we can email them below.
+  let notifyUser = null;
 
   // Status can be changed by anyone involved in the task or the subtask's own
   // assignee (who may not otherwise be on the task).
@@ -821,6 +841,8 @@ export async function updateSubtask(
         const assignable = await listAssignableTaskUsers(actor);
         const u = assignable.find((x) => x.id === input.assigneeId);
         if (!u) throw new AppError("You cannot assign to that person.", 403);
+        // Only notify when this is a genuinely new assignee (not a no-op re-save).
+        if (sub.assigneeId !== u.id && u.id !== actor.id) notifyUser = u;
         sub.assigneeId = u.id;
         sub.assigneeName = u.name;
       }
@@ -829,6 +851,22 @@ export async function updateSubtask(
 
   task.updatedAt = now();
   await saveTask(task);
+
+  // Notify the newly assigned person (best-effort, after the response is sent).
+  if (notifyUser) {
+    after(() =>
+      emailSubtaskAssigned({
+        to: notifyUser.email,
+        assigneeName: notifyUser.name,
+        subtaskTitle: sub.title,
+        taskTitle: task.title,
+        assignerName: actor.name,
+        taskId: task.id,
+        subtaskKey: sub.key,
+      })
+    );
+  }
+
   return toDTO(task);
 }
 

@@ -19,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DateTimePicker } from "@/components/ui/date-time-picker";
 import { RichTextEditor } from "@/components/rich-text";
 import { UserCombobox, } from "@/components/tasks/user-combobox";
 import { createMeetingSchema } from "@/lib/validation";
@@ -63,12 +64,13 @@ export function MeetingDialog({
     defaultValues: {
       title: meeting?.title ?? "",
       description: meeting?.description ?? "",
-      scheduledAt: meeting?.scheduledAt ? meeting.scheduledAt.slice(0, 16) : "",
+      scheduledAt: meeting?.scheduledAt ?? "",
       maxAttendees: meeting?.maxAttendees ?? 0,
     },
   });
 
   const description = useWatch({ control, name: "description" });
+  const scheduledAt = useWatch({ control, name: "scheduledAt" });
 
   async function onSubmit(values) {
     const url = mode === "create" ? "/api/meetings" : `/api/meetings/${meeting.id}`;
@@ -141,7 +143,15 @@ export function MeetingDialog({
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="scheduledAt">When</Label>
-                <Input id="scheduledAt" type="datetime-local" {...register("scheduledAt")} />
+                <DateTimePicker
+                  id="scheduledAt"
+                  value={scheduledAt}
+                  onChange={(v) =>
+                    setValue("scheduledAt", v, { shouldDirty: true })
+                  }
+                  alwaysTime
+                  placeholder="No time set"
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="maxAttendees">Max attendees (0 = no limit)</Label>

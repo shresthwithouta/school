@@ -11,6 +11,8 @@ import {
   ArrowUp,
   ArrowDown,
   ChevronRight,
+  CornerDownRight,
+  ListTree,
   Users,
   Loader2,
   AlertTriangle,
@@ -18,6 +20,7 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -31,6 +34,57 @@ import {
 import { StatusBadge, PriorityBadge } from "@/components/tasks/task-badges";
 import { TASK_PRIORITIES, PRIORITY_META } from "@/lib/task-meta";
 import { cn, formatDate, toPlainText } from "@/lib/utils";
+
+const DAY_MS = 86_400_000;
+
+// A subtask, reshaped to look exactly like a task so the list, filters, sorts
+// and overview counts can treat it identically. Subtask statuses (todo /
+// in_progress / done) map onto the task statuses, and the expected date plays
+// the role of the due date so "delayed" works the same way.
+function subtaskToRow(task, s) {
+  const done = s.status === "done";
+  const delayed =
+    !done && !!s.expectedDate && new Date(s.expectedDate).getTime() < Date.now();
+  const status = done
+    ? "completed"
+    : delayed
+      ? "delayed"
+      : s.status === "in_progress"
+        ? "in_progress"
+        : "assigned";
+  const daysLate = delayed
+    ? Math.max(1, Math.ceil((Date.now() - new Date(s.expectedDate).getTime()) / DAY_MS))
+    : 0;
+  return {
+    id: `${task.id}::${s.id}`,
+    isSubtask: true,
+    parentKey: task.key,
+    parentTitle: task.title,
+    href: `/tasks/${task.key}/${s.key}`,
+    key: s.key,
+    title: s.title,
+    description: s.description ?? "",
+    priority: s.priority ?? "medium",
+    status,
+    delayed,
+    daysLate,
+    dueDate: s.expectedDate ?? null,
+    assignerId: task.assignerId,
+    assignerName: task.assignerName,
+    assignees: s.assigneeId
+      ? [
+          {
+            id: s.assigneeId,
+            name: s.assigneeName,
+            role: "",
+            status: done ? "completed" : status,
+          },
+        ]
+      : [],
+    createdAt: s.createdAt,
+    updatedAt: s.completedAt || s.createdAt,
+  };
+}
 
 function AssigneeStack({ task }) {
   const count = task.assignees.length;
@@ -188,18 +242,31 @@ export function TasksClient({ tasks, currentUser }) {
   const [sort, setSort] = useState("updated");
   // Time/priority-style sorts feel natural newest/most-urgent first.
   const [dir, setDir] = useState("desc");
+  // Subtasks are surfaced in the board as first-class rows; this toggles them.
+  const [showSubtasks, setShowSubtasks] = useState(true);
 
-  // Live tallies per status, computed off the full task set (not the filtered
+  // The working set: tasks plus their subtasks reshaped as task-like rows, so
+  // every count, filter and sort below treats a subtask exactly like a task.
+  const items = useMemo(() => {
+    if (!showSubtasks) return tasks;
+    const rows = [...tasks];
+    for (const t of tasks) {
+      for (const s of t.subtasks || []) rows.push(subtaskToRow(t, s));
+    }
+    return rows;
+  }, [tasks, showSubtasks]);
+
+  // Live tallies per status, computed off the full set (not the filtered
   // view) so the header always reflects the true totals.
   const counts = useMemo(() => {
     const c = {};
-    for (const t of tasks) c[t.status] = (c[t.status] || 0) + 1;
+    for (const t of items) c[t.status] = (c[t.status] || 0) + 1;
     return c;
-  }, [tasks]);
+  }, [items]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const out = tasks.filter((t) => {
+    const out = items.filter((t) => {
       const mine = t.assignees.find((a) => a.id === currentUser.id);
       if (scope === "mine" && !mine) return false;
       if (scope === "created" && t.assignerId !== currentUser.id) return false;
@@ -211,7 +278,15 @@ export function TasksClient({ tasks, currentUser }) {
       if (priority !== "all" && t.priority !== priority) return false;
       if (
         q &&
-        ![t.key, t.title, toPlainText(t.description), t.assignerName, ...t.assignees.map((a) => a.name)]
+        ![
+          t.key,
+          t.title,
+          t.parentKey,
+          t.parentTitle,
+          toPlainText(t.description),
+          t.assignerName,
+          ...t.assignees.map((a) => a.name),
+        ]
           .filter(Boolean)
           .some((v) => v.toLowerCase().includes(q))
       )
@@ -227,7 +302,7 @@ export function TasksClient({ tasks, currentUser }) {
       if (sort === "due" && base !== 0 && (!a.dueDate || !b.dueDate)) return base;
       return base * factor;
     });
-  }, [tasks, query, scope, status, priority, sort, dir, currentUser.id]);
+  }, [items, query, scope, status, priority, sort, dir, currentUser.id]);
 
   return (
     <div className="space-y-4">
@@ -239,9 +314,9 @@ export function TasksClient({ tasks, currentUser }) {
           <div>
             <h2 className="text-base font-semibold tracking-tight sm:text-lg">Tasks overview</h2>
             <p className="text-xs text-muted-foreground">
-              {filtered.length === tasks.length
-                ? `${tasks.length} ${tasks.length === 1 ? "task" : "tasks"} across the board`
-                : `${filtered.length} of ${tasks.length} shown`}
+              {filtered.length === items.length
+                ? `${items.length} ${items.length === 1 ? "item" : "items"} across the board`
+                : `${filtered.length} of ${items.length} shown`}
             </p>
           </div>
           <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
@@ -342,6 +417,17 @@ export function TasksClient({ tasks, currentUser }) {
               <ArrowDown className="size-4" />
             )}
           </Button>
+
+          <Button
+            variant={showSubtasks ? "secondary" : "outline"}
+            size="sm"
+            title={showSubtasks ? "Hide subtasks" : "Show subtasks"}
+            onClick={() => setShowSubtasks((v) => !v)}
+            className="col-span-2 sm:col-span-1"
+          >
+            <ListTree className="size-4" />
+            Subtasks
+          </Button>
         </div>
       </div>
 
@@ -352,7 +438,7 @@ export function TasksClient({ tasks, currentUser }) {
           </div>
           <h3 className="mt-3 font-medium">No tasks here</h3>
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-            {tasks.length === 0
+            {items.length === 0
               ? "Create your first task to get going."
               : "Try a different filter or search."}
           </p>
@@ -370,18 +456,31 @@ export function TasksClient({ tasks, currentUser }) {
             {filtered.map((t) => (
               <li key={t.id}>
                 <Link
-                  href={`/tasks/${t.key}`}
+                  href={t.href ?? `/tasks/${t.key}`}
                   className="group/row flex items-center gap-3 px-3 py-3 transition-colors hover:bg-accent/60 sm:px-4"
                 >
                   <span className="hidden w-20 shrink-0 font-mono text-xs font-medium text-muted-foreground md:inline">
-                    {t.key}
+                    {t.isSubtask ? t.parentKey : t.key}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">{t.title}</span>
+                    <span className="flex items-center gap-1.5 font-medium">
+                      {t.isSubtask && (
+                        <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
+                      )}
+                      <span className="truncate">{t.title}</span>
+                    </span>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
                       <span className="font-mono text-[11px] text-muted-foreground md:hidden">
-                        {t.key}
+                        {t.isSubtask ? `${t.parentKey} · ${t.key}` : t.key}
                       </span>
+                      {t.isSubtask && (
+                        <Badge
+                          variant="outline"
+                          className="border-primary/30 bg-primary/10 px-1.5 py-0 text-[10px] font-medium text-primary"
+                        >
+                          Subtask
+                        </Badge>
+                      )}
                       <StatusBadge status={t.status} />
                       <PriorityBadge priority={t.priority} />
                       {t.delayed && t.daysLate > 0 && (

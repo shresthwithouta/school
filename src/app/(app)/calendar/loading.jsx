@@ -29,12 +29,14 @@ export default function CalendarLoading() {
             {Array.from({ length: 42 }).map((_, i) => (
               <div
                 key={i}
-                className="min-h-[6.5rem] border-b border-r p-1.5 last:border-r-0"
+                className="min-h-14 border-b border-r p-1 last:border-r-0 sm:min-h-26 sm:p-1.5"
               >
                 <div className="mb-1 flex justify-end">
                   <Skeleton className="size-6 rounded-full" />
                 </div>
-                {i % 3 === 0 && <Skeleton className="h-4 w-full rounded-md" />}
+                {i % 3 === 0 && (
+                  <Skeleton className="hidden h-4 w-full rounded-md sm:block" />
+                )}
               </div>
             ))}
           </div>
