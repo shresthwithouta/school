@@ -3,9 +3,9 @@
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
-      "package_name": "edu.school.swm",
+      "package_name": "app.vercel.schoolmanagementswm.twa",
       "sha256_cert_fingerprints": [
-        "REPLACE_WITH_YOUR_APK_SHA256_FINGERPRINT"
+        "DB:19:75:BF:55:E1:7A:D6:C1:09:6F:63:91:45:B3:C8:5A:80:24:BA:5B:D6:70:49:59:B9:40:36:30:B9:30:C7"
       ]
     }
   }

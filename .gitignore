@@ -40,3 +40,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# android packaging (never commit app binaries or signing keys)
+*.apk
+*.aab
+*.keystore
+*.jks
+/Readme.html
+/Readme copy.html
