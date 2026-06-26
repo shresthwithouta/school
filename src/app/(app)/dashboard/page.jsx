@@ -15,8 +15,8 @@ import {
 import { requireUser } from "@/lib/session";
 import { canManage, isOwner } from "@/lib/rbac";
 import { getTeamStats, listVisibleUsers } from "@/lib/users";
-import { getTaskStats, listVisibleTasks } from "@/lib/tasks";
-import { listVisibleMeetings, listPendingDecisions } from "@/lib/meetings";
+import { computeTaskStats, listVisibleTasks } from "@/lib/tasks";
+import { listVisibleMeetings, pendingDecisionsFromMeetings } from "@/lib/meetings";
 import { cn, formatDate, formatDateTime, getInitials } from "@/lib/utils";
 
 import { StatCard } from "@/components/stat-card";
@@ -87,19 +87,21 @@ export default async function DashboardPage() {
   const chair = isOwner(user.role);
   const firstName = user.name.split(" ")[0] || user.name;
 
-  const [taskStats, tasks, teamStats, recentMembers, meetings, pendingDecisions] =
-    await Promise.all([
-      getTaskStats(user),
-      listVisibleTasks(user),
-      manage && !chair ? getTeamStats(user) : Promise.resolve(null),
-      manage && !chair
-        ? listVisibleUsers(user).then((u) =>
-            u.filter((x) => x.id !== user.id).slice(0, 5)
-          )
-        : Promise.resolve([]),
-      listVisibleMeetings(user),
-      listPendingDecisions(user),
-    ]);
+  // Fetch the heavy lists once; derive stats/decisions from them in-memory
+  // rather than re-querying (getTaskStats and listPendingDecisions would each
+  // re-run the same find()).
+  const [tasks, teamStats, recentMembers, meetings] = await Promise.all([
+    listVisibleTasks(user),
+    manage && !chair ? getTeamStats(user) : Promise.resolve(null),
+    manage && !chair
+      ? listVisibleUsers(user).then((u) =>
+          u.filter((x) => x.id !== user.id).slice(0, 5)
+        )
+      : Promise.resolve([]),
+    listVisibleMeetings(user),
+  ]);
+  const taskStats = computeTaskStats(tasks, user.id);
+  const pendingDecisions = pendingDecisionsFromMeetings(meetings, user.id);
 
   const decisionsCard = (
     <Card>

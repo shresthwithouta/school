@@ -35,7 +35,7 @@ export default async function ReportsPage() {
           accent="emerald"
         />
         <StatCard title="Delayed" value={a.delayedTasks} icon={AlertTriangle} accent="rose" />
-        <StatCard title="Not completed" value={a.notCompleted} icon={CircleDashed} accent="amber" />
+        <StatCard title="On track" value={a.onTrack} icon={CircleDashed} accent="amber" />
       </div>
 
       <Card>
@@ -59,7 +59,7 @@ export default async function ReportsPage() {
                     <TableHead className="text-right">Assigned</TableHead>
                     <TableHead className="text-right">Completed</TableHead>
                     <TableHead className="text-right">Delayed</TableHead>
-                    <TableHead className="text-right">Not completed</TableHead>
+                    <TableHead className="text-right">On track</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -108,7 +108,7 @@ export default async function ReportsPage() {
                           "0"
                         )}
                       </TableCell>
-                      <TableCell className="text-right">{u.open}</TableCell>
+                      <TableCell className="text-right">{u.onTrack}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

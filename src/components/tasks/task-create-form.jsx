@@ -32,6 +32,10 @@ export function TaskCreateForm({ assignees, currentUserId }) {
   const [saving, setSaving] = useState(false);
 
   const isDraft = selected.length === 0;
+  // Low-rank staff may have no one below them to delegate to — they can still
+  // create a task for themselves, so make that explicit rather than leaving a
+  // seemingly empty, dead-end picker.
+  const onlySelf = !assignees.some((a) => a.id !== currentUserId);
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -116,7 +120,9 @@ export function TaskCreateForm({ assignees, currentUserId }) {
                 />
                 {isDraft && (
                   <p className="text-xs text-muted-foreground">
-                    No one assigned — this will be saved as a draft.
+                    {onlySelf
+                      ? "No one assigned yet. You can assign this task to yourself, or leave it empty to save as a draft."
+                      : "No one assigned — this will be saved as a draft."}
                   </p>
                 )}
               </div>

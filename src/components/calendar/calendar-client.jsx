@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ChevronLeft,
@@ -107,6 +107,23 @@ export function CalendarClient({ events }) {
     [events, scope]
   );
 
+  // Parse the date and recompute `overdue` in the browser's timezone, so the
+  // red "overdue" styling agrees with the day the event is bucketed under.
+  // (The server computes overdue in its own TZ, which can land a day off for
+  // users in another timezone.)
+  const nowMs = today.getTime();
+  const decorate = useCallback(
+    (ev) => {
+      const d = new Date(ev.date);
+      return {
+        ...ev,
+        _date: d,
+        overdue: ev.type !== "meeting" && !ev.done && d.getTime() < nowMs,
+      };
+    },
+    [nowMs]
+  );
+
   // Bucket events by calendar day, each bucket sorted by time.
   const byDay = useMemo(() => {
     const map = new Map();
@@ -115,13 +132,13 @@ export function CalendarClient({ events }) {
       if (Number.isNaN(d.getTime())) continue;
       const k = dayKey(d);
       if (!map.has(k)) map.set(k, []);
-      map.get(k).push({ ...ev, _date: d });
+      map.get(k).push(decorate(ev));
     }
     for (const list of map.values()) {
       list.sort((a, b) => a._date - b._date);
     }
     return map;
-  }, [scoped]);
+  }, [scoped, decorate]);
 
   const days = useMemo(() => buildMatrix(cursor), [cursor]);
 
@@ -132,13 +149,13 @@ export function CalendarClient({ events }) {
       today.getDate()
     ).getTime();
     return scoped
-      .map((ev) => ({ ...ev, _date: new Date(ev.date) }))
+      .map(decorate)
       .filter(
         (ev) => !Number.isNaN(ev._date.getTime()) && ev._date.getTime() >= startMs
       )
       .sort((a, b) => a._date - b._date)
       .slice(0, 60);
-  }, [scoped, today]);
+  }, [scoped, today, decorate]);
 
   const selectedEvents = byDay.get(dayKey(selectedDay)) || [];
 

@@ -1,5 +1,7 @@
 import crypto from "crypto";
 
+import { after } from "next/server";
+
 import { connectToDatabase, stripMongo } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { cleanHtml } from "@/lib/sanitize";
@@ -116,8 +118,10 @@ async function rawById(idOrKey) {
   if (!doc) return null;
   const m = stripMongo(doc );
   normalize(m);
+  // Numeric version for optimistic concurrency. Legacy docs predating `rev`
+  // come back as null and migrate on first save.
   Object.defineProperty(m, REV, {
-    value: m.updatedAt ?? null,
+    value: typeof m.rev === "number" ? m.rev : null,
     writable: true,
     enumerable: false,
   });
@@ -140,22 +144,25 @@ async function save(m) {
   await connectToDatabase();
   const prev = m[REV];
   if (prev === undefined) {
+    m.rev = 1;
     await Meeting.replaceOne({ id: m.id }, m, { upsert: true });
     Object.defineProperty(m, REV, {
-      value: m.updatedAt ?? null,
+      value: m.rev,
       writable: true,
       enumerable: false,
     });
     return;
   }
-  const res = await Meeting.replaceOne({ id: m.id, updatedAt: prev }, m);
+  const nextRev = (typeof prev === "number" ? prev : 0) + 1;
+  m.rev = nextRev;
+  const res = await Meeting.replaceOne({ id: m.id, rev: prev }, m);
   if (res.matchedCount === 0) {
     throw new AppError(
       "This meeting was changed by someone else. Refresh and try again.",
       409
     );
   }
-  m[REV] = m.updatedAt ?? null;
+  m[REV] = nextRev;
 }
 
 function buildAttachment(actor, input) {
@@ -194,7 +201,16 @@ export async function listVisibleMeetings(
 ) {
   const ids = await visibleUserIds(actor);
   await connectToDatabase();
-  const docs = await Meeting.find().lean();
+  // Only pull meetings the actor can actually see (created by, or attended by,
+  // someone in their visible set) — pushed to Mongo and backed by indexes so a
+  // worker isn't loading every meeting in the org. canSee stays as a safety net.
+  const idList = [...ids];
+  const docs = await Meeting.find({
+    $or: [
+      { createdById: { $in: idList } },
+      { "attendees.id": { $in: idList } },
+    ],
+  }).lean();
   const meetings = docs
     .map((d) => {
       const m = stripMongo(d );
@@ -216,11 +232,13 @@ export async function listVisibleMeetings(
  * Open (un-ticked) discussion decisions across meetings the actor is part of —
  * surfaced on their dashboard until someone ticks them off.
  */
-export async function listPendingDecisions(actor) {
-  const meetings = await listVisibleMeetings(actor);
+// Pure: pull the open decisions out of an already-fetched meeting list, so a
+// caller that already has the meetings (e.g. the dashboard) doesn't pay for a
+// second listVisibleMeetings query.
+export function pendingDecisionsFromMeetings(meetings, actorId) {
   const out = [];
   for (const m of meetings) {
-    if (!m.attendees.some((a) => a.id === actor.id)) continue;
+    if (!m.attendees.some((a) => a.id === actorId)) continue;
     for (const d of m.decisions ?? []) {
       if (!d.done) {
         out.push({
@@ -236,6 +254,11 @@ export async function listPendingDecisions(actor) {
     }
   }
   return out;
+}
+
+export async function listPendingDecisions(actor) {
+  const meetings = await listVisibleMeetings(actor);
+  return pendingDecisionsFromMeetings(meetings, actor.id);
 }
 
 export async function getMeetingForActor(
@@ -290,24 +313,30 @@ export async function createMeeting(
 
   await save(meeting);
 
+  // Notify invitees best-effort, after the response is sent — never block the
+  // save on a burst of SMTP handshakes.
   const whenStr = meeting.scheduledAt
     ? new Date(meeting.scheduledAt).toLocaleString("en-GB")
     : undefined;
-  await Promise.allSettled(
-    attendees.map((a) => {
-      const u = allowed.get(a.id);
-      return u
-        ? emailMeetingInvite({
-            to: u.email,
-            attendeeName: a.name,
+  const invites = attendees
+    .map((a) => ({ user: allowed.get(a.id), name: a.name }))
+    .filter((r) => r.user);
+  if (invites.length) {
+    after(() =>
+      Promise.allSettled(
+        invites.map((r) =>
+          emailMeetingInvite({
+            to: r.user.email,
+            attendeeName: r.name,
             title: meeting.title,
             byName: actor.name,
             meetingId: meeting.id,
             when: whenStr,
           })
-        : Promise.resolve();
-    })
-  );
+        )
+      )
+    );
+  }
 
   return toDTO(meeting);
 }
@@ -355,18 +384,22 @@ export async function updateMeeting(
   const whenStr = m.scheduledAt
     ? new Date(m.scheduledAt).toLocaleString("en-GB")
     : undefined;
-  await Promise.allSettled(
-    newlyInvited.map((r) =>
-      emailMeetingInvite({
-        to: r.to,
-        attendeeName: r.name,
-        title: m.title,
-        byName: actor.name,
-        meetingId: m.id,
-        when: whenStr,
-      })
-    )
-  );
+  if (newlyInvited.length) {
+    after(() =>
+      Promise.allSettled(
+        newlyInvited.map((r) =>
+          emailMeetingInvite({
+            to: r.to,
+            attendeeName: r.name,
+            title: m.title,
+            byName: actor.name,
+            meetingId: m.id,
+            when: whenStr,
+          })
+        )
+      )
+    );
+  }
 
   return toDTO(m);
 }
@@ -410,6 +443,9 @@ export async function addMeetingMessage(
   if (!isParticipant(actor, m)) {
     throw new AppError("Only people in this meeting can post messages.", 403);
   }
+  if (m.status === "completed") {
+    throw new AppError("This meeting has ended; the discussion is closed.", 400);
+  }
 
   const clean = cleanHtml(text);
   const atts = (attachments ?? []).map((a) => buildAttachment(actor, a));
@@ -440,6 +476,9 @@ export async function endMeeting(
   if (!canManageMeeting(actor, m)) {
     throw new AppError("Only the organizer can end this meeting.", 403);
   }
+  if (m.status === "completed") {
+    throw new AppError("This meeting has already ended.", 400);
+  }
   m.status = "completed";
   m.summary = cleanHtml(summary);
   m.updatedAt = now();
@@ -454,6 +493,9 @@ export async function addDecision(actor, id, text, dueDate) {
   if (!m) throw new AppError("Meeting not found.", 404);
   if (!isParticipant(actor, m)) {
     throw new AppError("Only people in this meeting can add decisions.", 403);
+  }
+  if (m.status === "completed") {
+    throw new AppError("This meeting has ended; decisions are locked.", 400);
   }
   const lines = String(text ?? "")
     .split(/\r?\n/)
@@ -504,7 +546,11 @@ export async function setDecisionDone(actor, id, decisionId, done) {
 export async function deleteDecision(actor, id, decisionId) {
   const m = await rawById(id);
   if (!m) throw new AppError("Meeting not found.", 404);
-  if (!isParticipant(actor, m)) {
+  const d = m.decisions.find((x) => x.id === decisionId);
+  if (!d) throw new AppError("Decision not found.", 404);
+  // Only the person who recorded the decision, the organizer, or an owner may
+  // remove it — not any attendee (they could otherwise wipe out others' minutes).
+  if (d.createdById !== actor.id && !canManageMeeting(actor, m)) {
     throw new AppError("You can't remove this decision.", 403);
   }
   m.decisions = m.decisions.filter((x) => x.id !== decisionId);

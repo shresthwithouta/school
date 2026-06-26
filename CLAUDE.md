@@ -13,16 +13,21 @@ Source is plain JS (no TypeScript); path alias `@/*` via `jsconfig.json`.
 - Users: `src/lib/store.js` (repo) + `models/User.js`. Auto-seeds 3 demo accounts
   when the collection is empty (`src/lib/demo.js`, client-safe).
 - Tasks: `src/lib/tasks.js` (data + lifecycle) + `models/Task.js`. `task-meta.js`
-  holds statuses/priorities/actions (client-safe). Read-modify-write whole task via
-  `findOneAndReplace`.
+  holds statuses/priorities/actions (client-safe). Read-modify-write the whole task
+  via `replaceOne`, guarded by a monotonic numeric `rev` for optimistic concurrency
+  (a stale write gets a 409). Meetings use the same `rev` pattern.
 - These modules use Mongoose — keep them OUT of the Edge `proxy` (it only imports
   `auth.config`, which has no DB).
 
 ## Tasks lifecycle
-assigned → accepted → in_progress → submitted → completed. Reject sends submitted
-back to in_progress with feedback. Reviewer = task assigner or Owner. Approve
-requires a Timeliness/Quality/Accuracy evaluation. Every action appends to the
-task's `activity` audit log.
+Per-assignee status is `assigned → in_progress → completed` (actions: `start`,
+`complete`). Task-level status is **derived** (never stored) in `deriveTaskStatus`:
+`draft` (no assignees) · `assigned` · `in_progress` · `delayed` (open & past due) ·
+`completed` (all assignees done AND no open subtasks) · `cancelled`. `cancel`/`reopen`
+are open to anyone involved (creator, assignee, or a manager). Only the creator can
+edit/delete the task. There is **no** accept/submit/reject or evaluation step — the
+`accepted`/`submitted` entries in `task-meta.js` are legacy badge styles kept so old
+data still renders. Every action appends to the task's `activity` audit log.
 
 ## Auth & access model
 - **No public sign-up.** Owner/Admin create all accounts in-app. Demo logins:
@@ -53,8 +58,11 @@ task's `activity` audit log.
 
 ## Built
 Auth + roles, dashboards, team mgmt, profiles (photo upload), Tasks (multi-assignee
-lifecycle, subtasks, rich text, threaded replies, attachments, evaluation, audit log),
-Analytics (/reports), Files/voice (Cloudinary), Email (Resend), Meetings.
+lifecycle, subtasks, rich text, threaded replies, attachments, audit log),
+Analytics (/reports), Files/voice (Cloudinary), Email (Gmail SMTP via nodemailer),
+Meetings (messages + decisions/action points), Calendar (tasks + meetings + my
+subtasks), Settings (profile + password).
 
 ## Roadmap (still ComingSoon)
-Events, Calendar, Approvals, Settings, recurring/reminders, and the AI features.
+Events, Approvals, recurring/reminders, task evaluation (Timeliness/Quality/Accuracy),
+forced password change on first login, login rate-limiting, and the AI features.

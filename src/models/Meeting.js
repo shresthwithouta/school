@@ -7,6 +7,8 @@ const MeetingSchema = new Schema(
     id: { type: String, required: true, unique: true, index: true },
     key: { type: String, default: "" },
     seq: { type: Number, default: 0 },
+    // Monotonic version for optimistic concurrency (see save() in lib/meetings).
+    rev: { type: Number, default: 0 },
     title: { type: String, required: true },
     description: { type: String, default: "" },
     scheduledAt: { type: String, default: null },
@@ -27,6 +29,12 @@ const MeetingSchema = new Schema(
   },
   { collection: "meetings", versionKey: false, minimize: false }
 );
+
+// Indexes backing the scoped visibility query in lib/meetings
+// (listVisibleMeetings) and the public-key lookup in rawById.
+MeetingSchema.index({ createdById: 1 });
+MeetingSchema.index({ "attendees.id": 1 });
+MeetingSchema.index({ key: 1 });
 
 const Meeting = models.Meeting || model("Meeting", MeetingSchema);
 export default Meeting;

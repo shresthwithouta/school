@@ -35,13 +35,16 @@ export const updateProfileSchema = z.object({
   department: optionalText(80),
   phone: optionalText(30),
   bio: optionalText(280),
-  // Uploaded image (data URL) or an http(s) URL. Capped to keep documents small.
+  // Only an inline image produced by the in-app uploader (a downscaled JPEG
+  // data URL). Arbitrary http(s) URLs are rejected so a profile photo can't be
+  // used to point every viewer's browser at a tracking pixel or internal host
+  // (SSRF/stored-URL injection). Capped to keep the user document small.
   avatarUrl: z
     .string()
-    .max(3_000_000, "Image is too large")
+    .max(1_000_000, "Image is too large")
     .refine(
-      (v) => v === "" || /^(data:image\/|https?:\/\/)/.test(v),
-      "Invalid image"
+      (v) => v === "" || /^data:image\//.test(v),
+      "Invalid image — upload a photo using the picker"
     )
     .optional()
     .or(z.literal("")),

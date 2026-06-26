@@ -75,15 +75,26 @@ export const store = {
     return docs.map((d) => stripMongo(d ));
   },
 
+  // Includes the password hash (re-selected) — only for the login/authorize path.
   async findByEmail(email) {
     await ensureSeeded();
-    const doc = await User.findOne({ email: email.toLowerCase().trim() }).lean();
+    const doc = await User.findOne({ email: email.toLowerCase().trim() })
+      .select("+passwordHash")
+      .lean();
     return doc ? stripMongo(doc ) : undefined;
   },
 
   async findById(id) {
     await ensureSeeded();
     const doc = await User.findOne({ id }).lean();
+    return doc ? stripMongo(doc ) : undefined;
+  },
+
+  // Like findById but re-selects the password hash — only for verifying the
+  // current password during a self-service password change.
+  async findByIdWithPassword(id) {
+    await ensureSeeded();
+    const doc = await User.findOne({ id }).select("+passwordHash").lean();
     return doc ? stripMongo(doc ) : undefined;
   },
 

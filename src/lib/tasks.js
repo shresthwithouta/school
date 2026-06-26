@@ -148,9 +148,11 @@ async function rawById(idOrKey) {
   if (!doc) return null;
   const task = stripMongo(doc );
   normalizeTask(task);
-  // Remember the version we read so saveTask can detect concurrent writes.
+  // Remember the numeric version we read so saveTask can detect concurrent
+  // writes. Legacy docs predating `rev` come back as null and migrate on first
+  // save (matched by `{ rev: null }`, which also matches a missing field).
   Object.defineProperty(task, REV, {
-    value: task.updatedAt ?? null,
+    value: typeof task.rev === "number" ? task.rev : null,
     writable: true,
     enumerable: false,
   });
@@ -167,34 +169,36 @@ function normalizeTask(task) {
   }
 }
 
-// Optimistic concurrency: an existing task is only overwritten if its
-// `updatedAt` still matches the value we read (REV). If another request changed
-// (or deleted) it in between, the write is rejected with a 409 instead of
-// silently clobbering their change. Brand-new tasks (no REV) are inserted.
+// Optimistic concurrency: an existing task is only overwritten if its numeric
+// `rev` still matches the value we read (REV). On every save we bump `rev`, so
+// if another request changed (or deleted) it in between, the write is rejected
+// with a 409 instead of silently clobbering their change. A monotonic counter
+// (not the millisecond `updatedAt`) means two writes in the same millisecond
+// can't both pass the guard and lose an update. Brand-new tasks are inserted.
 async function saveTask(task) {
   await connectToDatabase();
   const prev = task[REV];
   if (prev === undefined) {
     // Never loaded from the DB → genuinely new document.
+    task.rev = 1;
     await Task.replaceOne({ id: task.id }, task, { upsert: true });
     Object.defineProperty(task, REV, {
-      value: task.updatedAt ?? null,
+      value: task.rev,
       writable: true,
       enumerable: false,
     });
     return;
   }
-  const res = await Task.replaceOne(
-    { id: task.id, updatedAt: prev },
-    task
-  );
+  const nextRev = (typeof prev === "number" ? prev : 0) + 1;
+  task.rev = nextRev;
+  const res = await Task.replaceOne({ id: task.id, rev: prev }, task);
   if (res.matchedCount === 0) {
     throw new AppError(
       "This task was changed by someone else. Refresh and try again.",
       409
     );
   }
-  task[REV] = task.updatedAt ?? null;
+  task[REV] = nextRev;
 }
 
 function now() {
@@ -333,7 +337,20 @@ function canEdit(actor, task) {
 // ── Queries ────────────────────────────────────────────────────────
 export async function listVisibleTasks(actor) {
   await connectToDatabase();
-  const docs = await Task.find().lean();
+  // Managers (Owner/Admin) see every task, so load all. Everyone else only sees
+  // tasks they're connected to — push that filter to Mongo (backed by indexes)
+  // so a worker never loads the entire org's task collection just to discard
+  // most of it. canSeeTask below stays as a safety net / final authority.
+  const filter = canManage(actor.role)
+    ? {}
+    : {
+        $or: [
+          { assignerId: actor.id },
+          { "assignees.id": actor.id },
+          { "subtasks.assigneeId": actor.id },
+        ],
+      };
+  const docs = await Task.find(filter).lean();
   return docs
     .map((d) => {
       const t = stripMongo(d );
@@ -365,8 +382,10 @@ export async function getTaskForActor(
 
 
 
-export async function getTaskStats(actor) {
-  const tasks = await listVisibleTasks(actor);
+// Pure: derive the dashboard KPI counts from an already-fetched task list, so a
+// caller that already has the list (e.g. the dashboard) doesn't pay for a second
+// listVisibleTasks query just to count statuses.
+export function computeTaskStats(tasks, actorId) {
   const stats = {
     total: tasks.length,
     draft: 0,
@@ -384,9 +403,13 @@ export async function getTaskStats(actor) {
     else if (t.status === "delayed") stats.delayed += 1;
     else if (t.status === "completed") stats.completed += 1;
     else if (t.status === "cancelled") stats.cancelled += 1;
-    if (t.assignees.some((a) => a.id === actor.id)) stats.assignedToMe += 1;
+    if (t.assignees.some((a) => a.id === actorId)) stats.assignedToMe += 1;
   }
   return stats;
+}
+
+export async function getTaskStats(actor) {
+  return computeTaskStats(await listVisibleTasks(actor), actor.id);
 }
 
 // ── Analytics ──────────────────────────────────────────────────────
@@ -457,11 +480,16 @@ export async function getTaskAnalytics(actor) {
     .map(([id, e]) => ({
       id,
       ...e,
+      // Partition each person's assignments: completed + delayed + onTrack.
+      // `onTrack` is the open work that isn't past due (delayed ⊄ onTrack), so
+      // the columns sum to `assigned` instead of double-counting delayed work.
+      onTrack: Math.max(0, e.open - e.delayed),
       completionRate: e.assigned ? Math.round((e.completed / e.assigned) * 100) : 0,
     }))
     .sort((a, b) => b.completed - a.completed || b.assigned - a.assigned);
 
-  // Org totals over real (assigned, non-draft, non-cancelled) tasks.
+  // Org totals over real (assigned, non-draft, non-cancelled) tasks. These form
+  // a clean partition: completed + delayed + onTrack === totalAssigned.
   const active = tasks.filter(
     (t) => t.status !== "draft" && t.status !== "cancelled"
   );
@@ -472,7 +500,7 @@ export async function getTaskAnalytics(actor) {
     totalAssigned: active.length,
     completedTasks,
     delayedTasks,
-    notCompleted: active.length - completedTasks,
+    onTrack: Math.max(0, active.length - completedTasks - delayedTasks),
     completionRate: active.length
       ? Math.round((completedTasks / active.length) * 100)
       : 0,
@@ -638,7 +666,20 @@ export async function deleteTask(
   if (!canEdit(actor, task)) {
     throw new AppError("You are not allowed to delete this task.", 403);
   }
+  // Collect every Cloudinary asset this task owns — task-level attachments plus
+  // any attached to comments — so they don't leak in storage once the doc is gone.
+  const assets = [
+    ...(task.attachments || []),
+    ...(task.comments || []).flatMap((c) => c.attachments || []),
+  ].filter((a) => a && a.publicId);
   await Task.deleteOne({ id });
+  if (assets.length) {
+    after(() =>
+      Promise.allSettled(
+        assets.map((a) => destroyAsset(a.publicId, a.resourceType))
+      )
+    );
+  }
 }
 
 export async function addComment(

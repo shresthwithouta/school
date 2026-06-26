@@ -10,7 +10,9 @@ const UserSchema = new Schema(
     id: { type: String, required: true, unique: true, index: true },
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true, lowercase: true, index: true },
-    passwordHash: { type: String, required: true },
+    // select:false so the hash never rides along on ordinary reads — it must be
+    // explicitly re-selected (login + password change) to be loaded at all.
+    passwordHash: { type: String, required: true, select: false },
     role: { type: String, required: true },
     department: { type: String, default: "" },
     phone: { type: String, default: "" },

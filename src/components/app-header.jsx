@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { NAV_SECTIONS } from "@/lib/nav";
 import { getInitials } from "@/lib/utils";
 
@@ -25,6 +26,9 @@ export function AppHeader({ user }) {
 
   return (
     <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b bg-background/80 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      {/* Hamburger: on mobile the icon sidebar is hidden, so this opens the full
+          role-aware nav (Calendar, Team, Analytics, …) as a sheet. */}
+      <SidebarTrigger className="md:hidden" aria-label="Open navigation" />
       <h1 className="text-base font-semibold tracking-tight">
         {titleFromPath(pathname)}
       </h1>

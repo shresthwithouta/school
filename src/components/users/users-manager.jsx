@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { MoreHorizontal, Pencil, Trash2, UserPlus, Search } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2, UserPlus, Search, Ban, UserCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,7 +51,7 @@ function StatusBadge({ active }) {
   );
 }
 
-function MemberActions({ user, actorRole, onDelete }) {
+function MemberActions({ user, actorRole, onDelete, onToggleActive }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -72,6 +72,25 @@ function MemberActions({ user, actorRole, onDelete }) {
             </DropdownMenuItem>
           }
         />
+        <DropdownMenuItem
+          className="gap-2"
+          onSelect={(e) => {
+            e.preventDefault();
+            onToggleActive(user);
+          }}
+        >
+          {user.isActive ? (
+            <>
+              <Ban className="size-4" />
+              Deactivate
+            </>
+          ) : (
+            <>
+              <UserCheck className="size-4" />
+              Reactivate
+            </>
+          )}
+        </DropdownMenuItem>
         <DropdownMenuItem
           variant="destructive"
           className="gap-2"
@@ -132,6 +151,22 @@ export function UsersManager({ users, actorId, actorRole }) {
     }
     toast.success(`${deleteTarget.name} removed`);
     setDeleteTarget(null);
+    router.refresh();
+  }
+
+  async function toggleActive(user) {
+    const next = !user.isActive;
+    const res = await fetch(`/api/users/${user.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isActive: next }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(data.error ?? "Could not update member");
+      return;
+    }
+    toast.success(`${user.name} ${next ? "reactivated" : "deactivated"}`);
     router.refresh();
   }
 
@@ -225,7 +260,7 @@ export function UsersManager({ users, actorId, actorRole }) {
                     </TableCell>
                     <TableCell>
                       {canManageRow(u) && (
-                        <MemberActions user={u} actorRole={actorRole} onDelete={setDeleteTarget} />
+                        <MemberActions user={u} actorRole={actorRole} onDelete={setDeleteTarget} onToggleActive={toggleActive} />
                       )}
                     </TableCell>
                   </TableRow>
@@ -271,7 +306,7 @@ export function UsersManager({ users, actorId, actorRole }) {
                         </div>
                         <StatusBadge active={u.isActive} />
                         {canManageRow(u) && (
-                          <MemberActions user={u} actorRole={actorRole} onDelete={setDeleteTarget} />
+                          <MemberActions user={u} actorRole={actorRole} onDelete={setDeleteTarget} onToggleActive={toggleActive} />
                         )}
                       </li>
                     ))}
@@ -290,7 +325,10 @@ export function UsersManager({ users, actorId, actorRole }) {
             <AlertDialogDescription>
               This permanently deletes{" "}
               <span className="font-medium text-foreground">{deleteTarget?.name}</span>
-              &apos;s account. They will no longer be able to sign in. This cannot be undone.
+              &apos;s account and cannot be undone. If they&apos;re referenced by any tasks
+              or meetings, deletion is blocked to preserve that history — use{" "}
+              <span className="font-medium text-foreground">Deactivate</span> instead, which
+              keeps their record but blocks sign-in and new assignments.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

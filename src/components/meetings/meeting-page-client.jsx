@@ -264,7 +264,7 @@ export function MeetingPageClient({
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {isParticipant && (
+              {isParticipant && !completed && (
                 <div className="space-y-2 rounded-lg border bg-muted/20 p-2.5">
                   <Textarea
                     value={decision}
@@ -345,7 +345,7 @@ export function MeetingPageClient({
                             </span>
                           )}
                         </div>
-                        {isParticipant && (
+                        {(d.createdById === currentUser.id || organizer) && (
                           <button
                             type="button"
                             onClick={() => removeDecision(d)}

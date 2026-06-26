@@ -64,6 +64,12 @@ function rolesInTiers(tiers) {
   );
 }
 
+/** How many active Owner-tier accounts currently exist. */
+async function activeOwnerCount() {
+  const all = await store.list();
+  return all.filter((u) => (u.isActive ?? true) && isOwner(u.role)).length;
+}
+
 /**
  * Users the actor is allowed to see:
  *   Owner  -> everyone
@@ -201,6 +207,20 @@ export async function updateUser(
     throw new AppError("You cannot change your own Owner role.", 400);
   }
 
+  // Never let the organisation lose its last active Owner. Another Owner could
+  // otherwise demote or deactivate the only remaining Owner, locking everyone
+  // out of Owner-tier management for good.
+  if (isOwner(u.role) && (u.isActive ?? true)) {
+    const losingOwner =
+      (input.role && !isOwner(input.role)) || input.isActive === false;
+    if (losingOwner && (await activeOwnerCount()) <= 1) {
+      throw new AppError(
+        "This is the last active Owner — promote another Owner before changing this account.",
+        400
+      );
+    }
+  }
+
   const patch = {};
   if (input.name !== undefined) patch.name = input.name.trim();
   if (input.role !== undefined) patch.role = input.role;
@@ -235,6 +255,11 @@ export async function deleteUser(
 
   if (!canManageTarget(actor.role, u.role)) {
     throw new AppError("You are not allowed to delete this user.", 403);
+  }
+
+  // Don't let the only remaining Owner be deleted (org lockout).
+  if (isOwner(u.role) && (u.isActive ?? true) && (await activeOwnerCount()) <= 1) {
+    throw new AppError("This is the last active Owner and cannot be deleted.", 400);
   }
 
   // Tasks and meetings store denormalized copies of the user, so a hard delete
@@ -285,7 +310,7 @@ export async function changeOwnPassword(
   currentPassword,
   newPassword
 ) {
-  const u = await store.findById(userId);
+  const u = await store.findByIdWithPassword(userId);
   if (!u) throw new AppError("User not found.", 404);
 
   const valid = await bcrypt.compare(currentPassword, u.passwordHash);

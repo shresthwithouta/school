@@ -25,6 +25,16 @@ function baseUrl() {
   return "http://localhost:3000";
 }
 
+/** Escape a user-controlled value before it goes into email HTML. */
+function esc(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function layout(title, body, cta) {
   return `
   <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#0f172a">
@@ -88,8 +98,8 @@ export async function emailMeetingInvite(args
     subject: `Meeting invite: ${args.title}`,
     html: layout(
       "You've been invited to a meeting",
-      `Hi ${args.attendeeName}, <strong>${args.byName}</strong> invited you to <strong>${args.title}</strong>${
-        args.when ? ` on <strong>${args.when}</strong>` : ""
+      `Hi ${esc(args.attendeeName)}, <strong>${esc(args.byName)}</strong> invited you to <strong>${esc(args.title)}</strong>${
+        args.when ? ` on <strong>${esc(args.when)}</strong>` : ""
       }. Open it to join and follow the discussion.`,
       { label: "Open meeting", href: meetingUrl(args.meetingId) }
     ),
@@ -108,7 +118,7 @@ export async function emailTaskAssigned(args
     subject: `You've been assigned: ${args.taskTitle}`,
     html: layout(
       "You've been added to a task",
-      `Hi ${args.assigneeName}, <strong>${args.assignerName}</strong> assigned you to the task <strong>${args.taskTitle}</strong>. Open it to get started.`,
+      `Hi ${esc(args.assigneeName)}, <strong>${esc(args.assignerName)}</strong> assigned you to the task <strong>${esc(args.taskTitle)}</strong>. Open it to get started.`,
       { label: "Open task", href: taskUrl(args.taskId) }
     ),
   });
@@ -121,7 +131,7 @@ export async function emailSubtaskAssigned(args
     subject: `You've been assigned a subtask: ${args.subtaskTitle}`,
     html: layout(
       "You've been assigned a subtask",
-      `Hi ${args.assigneeName}, <strong>${args.assignerName}</strong> assigned you the subtask <strong>${args.subtaskTitle}</strong> under the task <strong>${args.taskTitle}</strong>. Open it to get started.`,
+      `Hi ${esc(args.assigneeName)}, <strong>${esc(args.assignerName)}</strong> assigned you the subtask <strong>${esc(args.subtaskTitle)}</strong> under the task <strong>${esc(args.taskTitle)}</strong>. Open it to get started.`,
       { label: "Open subtask", href: subtaskUrl(args.taskId, args.subtaskKey) }
     ),
   });
@@ -139,7 +149,7 @@ export async function emailTaskCompleted(args
     subject: `Completed: ${args.taskTitle}`,
     html: layout(
       "A task was completed ✅",
-      `Hi ${args.creatorName}, <strong>${args.byName}</strong> completed the task <strong>${args.taskTitle}</strong>.`,
+      `Hi ${esc(args.creatorName)}, <strong>${esc(args.byName)}</strong> completed the task <strong>${esc(args.taskTitle)}</strong>.`,
       { label: "View task", href: taskUrl(args.taskId) }
     ),
   });

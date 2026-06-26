@@ -2,16 +2,33 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ClipboardList, CalendarClock, Settings, Plus } from "lucide-react";
+import {
+  LayoutDashboard,
+  ClipboardList,
+  CalendarClock,
+  Settings,
+  Users,
+  BarChart3,
+  Plus,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { canManage } from "@/lib/rbac";
 import { NavProgress } from "@/components/nav-progress";
 
-const TABS = [
-  { title: "Home", href: "/dashboard", icon: LayoutDashboard, exact: true },
-  { title: "Tasks", href: "/tasks", icon: ClipboardList },
+const HOME = { title: "Home", href: "/dashboard", icon: LayoutDashboard, exact: true };
+const TASKS = { title: "Tasks", href: "/tasks", icon: ClipboardList };
+
+// The two slots after the centre "+" depend on role. Managers get their core
+// oversight areas one tap away; everyone can still reach the rest (Calendar,
+// Settings, …) via the header hamburger.
+const WORKER_RIGHT = [
   { title: "Meetings", href: "/meetings", icon: CalendarClock },
   { title: "Settings", href: "/settings", icon: Settings },
+];
+const MANAGER_RIGHT = [
+  { title: "Team", href: "/users", icon: Users },
+  { title: "Analytics", href: "/reports", icon: BarChart3 },
 ];
 
 function active(pathname, href, exact) {
@@ -19,13 +36,15 @@ function active(pathname, href, exact) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function MobileTabs() {
+export function MobileTabs({ role }) {
   const pathname = usePathname();
+  const left = [HOME, TASKS];
+  const right = canManage(role) ? MANAGER_RIGHT : WORKER_RIGHT;
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur md:hidden">
       <div className="mx-auto flex max-w-md items-center justify-around px-2 py-1.5">
-        {TABS.slice(0, 2).map((t) => (
+        {left.map((t) => (
           <TabLink key={t.href} tab={t} pathname={pathname} />
         ))}
 
@@ -38,7 +57,7 @@ export function MobileTabs() {
           <NavProgress />
         </Link>
 
-        {TABS.slice(2).map((t) => (
+        {right.map((t) => (
           <TabLink key={t.href} tab={t} pathname={pathname} />
         ))}
       </div>

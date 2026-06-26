@@ -40,7 +40,8 @@ export default async function MemberAnalyticsPage({ params }) {
   const minePart = (t) => t.assignees.find((a) => a.id === userId);
   const completed = tasks.filter((t) => minePart(t)?.status === "completed").length;
   const delayed = tasks.filter((t) => t.delayed && minePart(t)?.status !== "completed").length;
-  const open = tasks.length - completed;
+  // Clean partition: assigned = completed + delayed + onTrack (no overlap).
+  const onTrack = Math.max(0, tasks.length - completed - delayed);
 
   return (
     <div className="space-y-6">
@@ -91,7 +92,7 @@ export default async function MemberAnalyticsPage({ params }) {
         <Stat label="Assigned" value={tasks.length} />
         <Stat label="Completed" value={completed} />
         <Stat label="Delayed" value={delayed} danger />
-        <Stat label="Not completed" value={open} />
+        <Stat label="On track" value={onTrack} />
       </div>
 
       <Card>

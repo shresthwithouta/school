@@ -8,6 +8,8 @@ const TaskSchema = new Schema(
     // Jira-style human key, e.g. "AC-12" (prefix from title + sequence number).
     key: { type: String, default: "" },
     seq: { type: Number, default: 0 },
+    // Monotonic version for optimistic concurrency (see saveTask in lib/tasks).
+    rev: { type: Number, default: 0 },
     title: { type: String, required: true },
     description: { type: String, default: "" },
     priority: { type: String, required: true },
@@ -32,6 +34,13 @@ const TaskSchema = new Schema(
   },
   { collection: "tasks", versionKey: false, minimize: false }
 );
+
+// Indexes backing the scoped visibility query in lib/tasks (listVisibleTasks)
+// and the public-key lookup in rawById.
+TaskSchema.index({ assignerId: 1 });
+TaskSchema.index({ "assignees.id": 1 });
+TaskSchema.index({ "subtasks.assigneeId": 1 });
+TaskSchema.index({ key: 1 });
 
 const Task = models.Task || model("Task", TaskSchema);
 export default Task;
