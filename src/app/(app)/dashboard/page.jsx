@@ -9,6 +9,7 @@ import {
   ArrowRight,
   CalendarDays,
   CalendarClock,
+  GitBranch,
   Plus,
 } from "lucide-react";
 
@@ -23,6 +24,8 @@ import { StatCard } from "@/components/stat-card";
 import { PendingDecisions } from "@/components/dashboard/pending-decisions";
 import { TierBadge } from "@/components/role-badge";
 import { StatusBadge, PriorityBadge } from "@/components/tasks/task-badges";
+import { SUBTASK_STATUS_META } from "@/lib/task-meta";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -339,6 +342,22 @@ export default async function DashboardPage() {
     })
     .slice(0, 6);
 
+  // Subtasks assigned directly to me (I may not be on the parent task itself),
+  // earliest expected date first. Surfaced so a subtask-only assignee isn't left
+  // wondering where their work is.
+  const mySubtasks = tasks
+    .flatMap((t) =>
+      (t.subtasks ?? [])
+        .filter((s) => s.assigneeId === user.id && s.status !== "done")
+        .map((s) => ({ sub: s, task: t }))
+    )
+    .sort((a, b) => {
+      if (!a.sub.expectedDate) return 1;
+      if (!b.sub.expectedDate) return -1;
+      return a.sub.expectedDate < b.sub.expectedDate ? -1 : 1;
+    })
+    .slice(0, 6);
+
   return (
     <div className="space-y-6">
       {header}
@@ -522,6 +541,66 @@ export default async function DashboardPage() {
           </Card>
         )}
       </div>
+
+      {/* My subtasks — only when I have open ones assigned to me */}
+      {mySubtasks.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>My subtasks</CardTitle>
+            <CardDescription>Subtask items assigned to you</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y">
+              {mySubtasks.map(({ sub, task: t }) => {
+                const meta = SUBTASK_STATUS_META[sub.status];
+                const overdue = sub.overdue;
+                return (
+                  <li key={sub.id}>
+                    <Link
+                      href={`/tasks/${t.key}/${sub.key}`}
+                      className="-mx-2 flex items-center gap-3 rounded-md px-2 py-3 transition-colors hover:bg-accent/40"
+                    >
+                      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                        <GitBranch className="size-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium">{sub.title}</p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          {meta && (
+                            <Badge
+                              variant="outline"
+                              className={cn("font-medium", meta.badgeClass)}
+                            >
+                              {meta.label}
+                            </Badge>
+                          )}
+                          <PriorityBadge priority={sub.priority} />
+                          <span className="truncate text-xs text-muted-foreground">
+                            {t.key} · {t.title}
+                          </span>
+                        </div>
+                      </div>
+                      {sub.expectedDate && (
+                        <span
+                          className={cn(
+                            "inline-flex shrink-0 items-center gap-1 text-xs",
+                            overdue
+                              ? "font-medium text-rose-600 dark:text-rose-400"
+                              : "text-muted-foreground"
+                          )}
+                        >
+                          <CalendarDays className="size-3.5" />
+                          {formatDate(sub.expectedDate)}
+                        </span>
+                      )}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Upcoming meetings */}
       <Card>

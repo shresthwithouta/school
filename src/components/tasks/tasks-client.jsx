@@ -342,9 +342,22 @@ export function TasksClient({ tasks, currentUser }) {
         </div>
       </div>
 
-      {/* Top row: scope + create */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs value={scope} onValueChange={setScope}>
+      {/* Top row: scope + create. Scope is a compact dropdown on mobile (so the
+          five options never wrap into a broken row) and a tab bar on sm+. */}
+      <div className="flex items-center justify-between gap-2">
+        <Select value={scope} onValueChange={setScope}>
+          <SelectTrigger className="w-40 shrink-0 sm:hidden">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {scopes.map((s) => (
+              <SelectItem key={s.value} value={s.value}>
+                {s.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Tabs value={scope} onValueChange={setScope} className="hidden min-w-0 sm:block">
           <TabsList className="h-auto flex-wrap gap-1 border border-border/70 bg-muted/60 p-1 shadow-sm">
             {scopes.map((s) => (
               <TabsTrigger
@@ -376,9 +389,9 @@ export function TasksClient({ tasks, currentUser }) {
             className="pl-9"
           />
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+        <div className="flex flex-wrap items-center gap-2">
           <Select value={priority} onValueChange={setPriority}>
-            <SelectTrigger className="w-full sm:w-36">
+            <SelectTrigger className="min-w-30 flex-1 sm:w-36 sm:flex-none">
               <SelectValue placeholder="Priority" />
             </SelectTrigger>
             <SelectContent>
@@ -392,7 +405,7 @@ export function TasksClient({ tasks, currentUser }) {
           </Select>
 
           <Select value={sort} onValueChange={setSort}>
-            <SelectTrigger className="w-full sm:w-40">
+            <SelectTrigger className="min-w-36 flex-1 sm:w-40 sm:flex-none">
               <ArrowDownUp className="size-4 text-muted-foreground" />
               <SelectValue />
             </SelectTrigger>
@@ -408,6 +421,7 @@ export function TasksClient({ tasks, currentUser }) {
           <Button
             variant="outline"
             size="icon"
+            className="shrink-0"
             title={dir === "asc" ? "Ascending" : "Descending"}
             onClick={() => setDir((d) => (d === "asc" ? "desc" : "asc"))}
           >
@@ -423,7 +437,7 @@ export function TasksClient({ tasks, currentUser }) {
             size="sm"
             title={showSubtasks ? "Hide subtasks" : "Show subtasks"}
             onClick={() => setShowSubtasks((v) => !v)}
-            className="col-span-2 sm:col-span-1"
+            className="shrink-0"
           >
             <ListTree className="size-4" />
             Subtasks

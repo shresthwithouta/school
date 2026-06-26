@@ -244,6 +244,10 @@ function toDTO(t) {
   const subtasks = (t.subtasks || []).map((s, i) => ({
     ...s,
     key: s.key || `SB-${i + 1}`,
+    overdue:
+      s.status !== "done" &&
+      !!s.expectedDate &&
+      new Date(s.expectedDate).getTime() < Date.now(),
   }));
   return {
     ...t,
