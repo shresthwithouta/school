@@ -2,11 +2,24 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Search, Plus, CalendarDays, Inbox, ArrowDownUp, ArrowUp, ArrowDown, ChevronRight } from "lucide-react";
+import {
+  Search,
+  Plus,
+  CalendarDays,
+  Inbox,
+  ArrowDownUp,
+  ArrowUp,
+  ArrowDown,
+  ChevronRight,
+  Users,
+  Loader2,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -16,30 +29,91 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { StatusBadge, PriorityBadge } from "@/components/tasks/task-badges";
-import { TASK_STATUSES, STATUS_META, TASK_PRIORITIES, PRIORITY_META } from "@/lib/task-meta";
-import { cn, formatDate, getInitials, toPlainText } from "@/lib/utils";
+import { TASK_PRIORITIES, PRIORITY_META } from "@/lib/task-meta";
+import { cn, formatDate, toPlainText } from "@/lib/utils";
 
 function AssigneeStack({ task }) {
-  if (task.assignees.length === 0) {
-    return <span className="text-xs text-muted-foreground">Unassigned</span>;
+  const count = task.assignees.length;
+  if (count === 0) {
+    return <span className="text-xs text-muted-foreground">—</span>;
   }
-  const shown = task.assignees.slice(0, 3);
-  const extra = task.assignees.length - shown.length;
   return (
-    <div className="flex items-center -space-x-2">
-      {shown.map((a) => (
-        <Avatar key={a.id} className="size-7 ring-2 ring-card" title={a.name}>
-          <AvatarFallback className="bg-primary/10 text-xs text-primary">
-            {getInitials(a.name)}
-          </AvatarFallback>
-        </Avatar>
-      ))}
-      {extra > 0 && (
-        <span className="flex size-7 items-center justify-center rounded-full bg-muted text-xs font-medium ring-2 ring-card">
-          +{extra}
-        </span>
+    <span
+      className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+      title={task.assignees.map((a) => a.name).join(", ")}
+    >
+      <Users className="size-3.5" />
+      {count}
+    </span>
+  );
+}
+
+// Live overview cards — each one filters the list when clicked.
+// "active" merges in-progress + assigned (the tasks currently being worked).
+const STAT_CARDS = [
+  {
+    key: "active",
+    statuses: ["in_progress", "assigned"],
+    label: "Active",
+    Icon: Loader2,
+    iconClass: "text-amber-600 dark:text-amber-400",
+    ring: "data-[active=true]:border-amber-500/50 data-[active=true]:bg-amber-500/10",
+    dot: "bg-amber-500",
+  },
+  {
+    key: "delayed",
+    statuses: ["delayed"],
+    label: "Delayed",
+    Icon: AlertTriangle,
+    iconClass: "text-rose-600 dark:text-rose-400",
+    ring: "data-[active=true]:border-rose-500/50 data-[active=true]:bg-rose-500/10",
+    dot: "bg-rose-500",
+  },
+  {
+    key: "completed",
+    statuses: ["completed"],
+    label: "Completed",
+    Icon: CheckCircle2,
+    iconClass: "text-emerald-600 dark:text-emerald-400",
+    ring: "data-[active=true]:border-emerald-500/50 data-[active=true]:bg-emerald-500/10",
+    dot: "bg-emerald-500",
+  },
+  {
+    key: "cancelled",
+    statuses: ["cancelled"],
+    label: "Cancelled",
+    Icon: XCircle,
+    iconClass: "text-muted-foreground",
+    ring: "data-[active=true]:border-foreground/30 data-[active=true]:bg-muted",
+    dot: "bg-muted-foreground",
+  },
+];
+
+function StatCard({ card, count, active, onClick }) {
+  const { label, Icon, iconClass, ring, dot } = card;
+  return (
+    <button
+      type="button"
+      data-active={active}
+      onClick={onClick}
+      className={cn(
+        "group flex items-center justify-between gap-2 rounded-lg border bg-card px-2.5 py-1.5 text-left transition-all hover:bg-accent/60 hover:shadow-sm",
+        "sm:flex-col sm:items-start sm:gap-2 sm:rounded-xl sm:p-4",
+        ring
       )}
-    </div>
+    >
+      {/* Mobile: number + label sit on one compact row. Desktop: stacked. */}
+      <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-muted-foreground sm:text-xs sm:order-1">
+        <span className={cn("size-1.5 shrink-0 rounded-full", dot)} />
+        <span className="truncate">{label}</span>
+      </span>
+      <span className="ml-auto flex shrink-0 items-center gap-1.5 sm:ml-0 sm:gap-2 sm:order-2 sm:w-full sm:justify-between">
+        <span className="text-base font-semibold leading-none tabular-nums sm:text-2xl">
+          {count}
+        </span>
+        <Icon className={cn("size-3.5 shrink-0 sm:size-4", iconClass)} />
+      </span>
+    </button>
   );
 }
 
@@ -115,6 +189,14 @@ export function TasksClient({ tasks, currentUser }) {
   // Time/priority-style sorts feel natural newest/most-urgent first.
   const [dir, setDir] = useState("desc");
 
+  // Live tallies per status, computed off the full task set (not the filtered
+  // view) so the header always reflects the true totals.
+  const counts = useMemo(() => {
+    const c = {};
+    for (const t of tasks) c[t.status] = (c[t.status] || 0) + 1;
+    return c;
+  }, [tasks]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const out = tasks.filter((t) => {
@@ -123,7 +205,9 @@ export function TasksClient({ tasks, currentUser }) {
       if (scope === "created" && t.assignerId !== currentUser.id) return false;
       if (scope === "done-by-me" && !(mine && mine.status === "completed")) return false;
       if (scope === "drafts" && t.status !== "draft") return false;
-      if (status !== "all" && t.status !== status) return false;
+      if (status === "active") {
+        if (t.status !== "in_progress" && t.status !== "assigned") return false;
+      } else if (status !== "all" && t.status !== status) return false;
       if (priority !== "all" && t.priority !== priority) return false;
       if (
         q &&
@@ -147,12 +231,52 @@ export function TasksClient({ tasks, currentUser }) {
 
   return (
     <div className="space-y-4">
+      {/* Live overview header */}
+      <div className="relative overflow-hidden rounded-2xl border bg-linear-to-br from-card via-card to-muted/40 p-3 shadow-sm sm:p-5">
+        {/* Soft glow accent in the corner for a bit of depth */}
+        <div className="pointer-events-none absolute -right-16 -top-16 size-40 rounded-full bg-primary/10 blur-3xl" />
+        <div className="relative mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight sm:text-lg">Tasks overview</h2>
+            <p className="text-xs text-muted-foreground">
+              {filtered.length === tasks.length
+                ? `${tasks.length} ${tasks.length === 1 ? "task" : "tasks"} across the board`
+                : `${filtered.length} of ${tasks.length} shown`}
+            </p>
+          </div>
+          <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
+            <span className="relative flex size-2">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500/70" />
+              <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+            </span>
+            Live
+          </span>
+        </div>
+        <div className="relative grid grid-cols-2 gap-1.5 sm:grid-cols-4 sm:gap-2">
+          {STAT_CARDS.map((card) => (
+            <StatCard
+              key={card.key}
+              card={card}
+              count={card.statuses.reduce((n, s) => n + (counts[s] || 0), 0)}
+              active={status === card.key}
+              onClick={() =>
+                setStatus((s) => (s === card.key ? "all" : card.key))
+              }
+            />
+          ))}
+        </div>
+      </div>
+
       {/* Top row: scope + create */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Tabs value={scope} onValueChange={setScope}>
-          <TabsList className="flex-wrap">
+          <TabsList className="h-auto flex-wrap gap-1 border border-border/70 bg-muted/60 p-1 shadow-sm">
             {scopes.map((s) => (
-              <TabsTrigger key={s.value} value={s.value}>
+              <TabsTrigger
+                key={s.value}
+                value={s.value}
+                className="cursor-pointer rounded-md px-3 py-1.5 hover:bg-background/60 data-active:shadow-sm"
+              >
                 {s.label}
               </TabsTrigger>
             ))}
@@ -178,20 +302,6 @@ export function TasksClient({ tasks, currentUser }) {
           />
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
-          <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger className="w-full sm:w-36">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              {TASK_STATUSES.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {STATUS_META[s].label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
           <Select value={priority} onValueChange={setPriority}>
             <SelectTrigger className="w-full sm:w-36">
               <SelectValue placeholder="Priority" />
@@ -234,10 +344,6 @@ export function TasksClient({ tasks, currentUser }) {
           </Button>
         </div>
       </div>
-
-      <p className="text-xs text-muted-foreground">
-        {filtered.length} of {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
-      </p>
 
       {filtered.length === 0 ? (
         <div className="flex min-h-[40vh] flex-col items-center justify-center rounded-xl border border-dashed p-8 text-center">

@@ -130,6 +130,23 @@
   }
 }
 
+/* Top navigation progress bar — trickles toward the end while a route loads,
+   then unmounts the moment navigation completes (see components/nav-progress). */
+.nav-progress-bar {
+  animation: nav-progress 2.2s cubic-bezier(0.1, 0.7, 0.3, 1) forwards;
+}
+@keyframes nav-progress {
+  0% {
+    width: 0%;
+  }
+  40% {
+    width: 65%;
+  }
+  100% {
+    width: 92%;
+  }
+}
+
 /* Rich-text content (Tiptap editor + rendered output) */
 .richtext {
   font-size: 0.875rem;

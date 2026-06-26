@@ -15,6 +15,9 @@ export function UserCombobox({
   onChange,
   currentUserId,
   placeholder,
+  // When true, only one person can be chosen: picking a new one replaces the
+  // current selection and the search input hides until it's cleared.
+  single = false,
 }
 
 
@@ -41,12 +44,17 @@ export function UserCombobox({
   }, [users, value, query]);
 
   function add(id) {
-    onChange([...value, id]);
+    onChange(single ? [id] : [...value, id]);
     setQuery("");
+    if (single) setOpen(false);
   }
   function remove(id) {
     onChange(value.filter((x) => x !== id));
   }
+
+  // In single mode, hide the search box once someone is picked — clear the
+  // current choice (the × on the chip) to pick a different person.
+  const atMax = single && value.length >= 1;
 
   return (
     <div className="space-y-2">
@@ -77,6 +85,7 @@ export function UserCombobox({
         </div>
       )}
 
+      {!atMax && (
       <div className="relative">
         <Input
           value={query}
@@ -124,6 +133,7 @@ export function UserCombobox({
           </ul>
         )}
       </div>
+      )}
     </div>
   );
 }

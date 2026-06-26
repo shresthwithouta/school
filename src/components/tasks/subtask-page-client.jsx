@@ -29,13 +29,22 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { SUBTASK_STATUSES, SUBTASK_STATUS_META } from "@/lib/task-meta";
+import { PriorityBadge } from "@/components/tasks/task-badges";
+import { RichText, RichTextEditor } from "@/components/rich-text";
+import {
+  SUBTASK_STATUSES,
+  SUBTASK_STATUS_META,
+  TASK_PRIORITIES,
+  PRIORITY_META,
+} from "@/lib/task-meta";
 
-export function SubtaskPageClient({ task, sub, assignees, canEdit, currentUserId }) {
+export function SubtaskPageClient({ task, sub, assignees, canEdit, canDelete, currentUserId }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [title, setTitle] = useState(sub.title);
+  const [desc, setDesc] = useState(sub.description ?? "");
 
+  const priority = sub.priority ?? "medium";
   const canStatus = canEdit || sub.assigneeId === currentUserId;
   const base = `/api/tasks/${task.id}/subtasks/${sub.id}`;
 
@@ -90,15 +99,16 @@ export function SubtaskPageClient({ task, sub, assignees, canEdit, currentUserId
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-sm text-muted-foreground">{sub.key}</span>
             <Badge variant="outline" className={SUBTASK_STATUS_META[sub.status].badgeClass}>
               {SUBTASK_STATUS_META[sub.status].label}
             </Badge>
+            <PriorityBadge priority={priority} />
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">{sub.title}</h1>
         </div>
-        {canEdit && (
+        {canDelete && (
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="outline" size="sm" className="text-destructive">
@@ -157,6 +167,31 @@ export function SubtaskPageClient({ task, sub, assignees, canEdit, currentUserId
                 )}
               </div>
             </div>
+
+            <div className="space-y-2">
+              <Label>Description</Label>
+              {canEdit ? (
+                <>
+                  <RichTextEditor
+                    value={desc}
+                    onChange={setDesc}
+                    placeholder="Add details, context or steps…"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy || desc === (sub.description ?? "")}
+                    onClick={() => patch({ description: desc }, "Description updated")}
+                  >
+                    Save description
+                  </Button>
+                </>
+              ) : sub.description ? (
+                <RichText html={sub.description} className="text-muted-foreground" />
+              ) : (
+                <p className="text-sm text-muted-foreground">No description.</p>
+              )}
+            </div>
           </CardContent>
         </Card>
 
@@ -166,6 +201,22 @@ export function SubtaskPageClient({ task, sub, assignees, canEdit, currentUserId
             <CardTitle className="text-base">Details</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Task</Label>
+              <Link
+                href={`/tasks/${task.key}`}
+                className="flex items-center gap-2 rounded-lg border p-2.5 transition-colors hover:border-primary/40 hover:bg-accent/40"
+              >
+                <span className="font-mono text-xs text-muted-foreground">
+                  {task.key}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-medium">
+                  {task.title}
+                </span>
+                <ChevronRight className="size-4 text-muted-foreground" />
+              </Link>
+            </div>
+
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Status</Label>
               <Select
@@ -184,6 +235,30 @@ export function SubtaskPageClient({ task, sub, assignees, canEdit, currentUserId
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Priority</Label>
+              {canEdit ? (
+                <Select
+                  value={priority}
+                  onValueChange={(v) => patch({ priority: v })}
+                  disabled={busy}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TASK_PRIORITIES.map((p) => (
+                      <SelectItem key={p} value={p}>
+                        {PRIORITY_META[p].label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <PriorityBadge priority={priority} />
+              )}
             </div>
 
             <div className="space-y-1.5">

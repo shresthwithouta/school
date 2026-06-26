@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ListChecks, CalendarClock, Settings, Plus } from "lucide-react";
+import { LayoutDashboard, ClipboardList, CalendarClock, Settings, Plus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { NavProgress } from "@/components/nav-progress";
 
 const TABS = [
   { title: "Home", href: "/dashboard", icon: LayoutDashboard, exact: true },
-  { title: "Tasks", href: "/tasks", icon: ListChecks },
+  { title: "Tasks", href: "/tasks", icon: ClipboardList },
   { title: "Meetings", href: "/meetings", icon: CalendarClock },
   { title: "Settings", href: "/settings", icon: Settings },
 ];
@@ -34,6 +35,7 @@ export function MobileTabs() {
           className="-mt-5 flex size-12 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg ring-4 ring-background"
         >
           <Plus className="size-6" />
+          <NavProgress />
         </Link>
 
         {TABS.slice(2).map((t) => (
@@ -56,6 +58,7 @@ function TabLink({ tab, pathname }) {
     >
       <tab.icon className="size-5" />
       {tab.title}
+      <NavProgress />
     </Link>
   );
 }

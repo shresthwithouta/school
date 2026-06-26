@@ -1,17 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   ArrowLeft,
-  Loader2,
   Trash2,
   Pencil,
   X,
-  Ban,
-  RotateCcw,
   ChevronRight,
   CheckCircle2,
   MessageSquare,
@@ -33,18 +30,12 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-} from "@/components/ui/select";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { StatusBadge, PriorityBadge } from "@/components/tasks/task-badges";
+import { StatusSelect } from "@/components/tasks/status-select";
 import { TaskDialog } from "@/components/tasks/task-dialog";
 import { UserCombobox } from "@/components/tasks/user-combobox";
 import { CommentThread } from "@/components/tasks/comment-thread";
@@ -56,24 +47,35 @@ import { cn, formatDate, formatDateTime, getInitials } from "@/lib/utils";
 export function TaskPageClient({ task, assignees, currentUser }) {
   const router = useRouter();
   const [busy, setBusy] = useState(null);
-  const [newSub, setNewSub] = useState("");
+  // Refresh after a mutation inside a transition so it never blocks the UI.
+  const [, startTransition] = useTransition();
+  // Dedicated busy state for the status switcher so it can show feedback the
+  // instant an option is picked (the server round-trip + refresh is slow).
+  const [statusSending, setStatusSending] = useState(false);
+  const [statusPending, startStatusTransition] = useTransition();
+  const statusBusy = statusSending || statusPending;
 
   const mine = task.assignees.find((a) => a.id === currentUser.id) ?? null;
   const isManager = currentUser.tier === "OWNER" || currentUser.tier === "ADMIN";
   const canEdit = currentUser.id === task.assignerId;
-  const canControl = canEdit || isManager;
+  // Anyone collaborating on the task (creator, an assignee, or a manager) can
+  // drive its workflow and add subtasks — not just the creator.
+  const involved = canEdit || isManager || !!mine;
+  const canControl = involved;
   const isClosed = task.status === "completed" || task.status === "cancelled";
 
-  // Jira-style status switcher options (each maps to a transition action).
+  // Jira-style status switcher options (each maps to a transition action). A
+  // closed task only offers Reopen; an open one offers the work transitions.
   const statusOptions = [];
-  if (mine && mine.status !== "completed") {
-    if (mine.status !== "in_progress")
-      statusOptions.push({ value: "start", label: "In progress" });
-    statusOptions.push({ value: "complete", label: "Completed" });
-  }
-  if (canControl) {
-    if (!isClosed) statusOptions.push({ value: "cancel", label: "Cancelled" });
-    if (isClosed) statusOptions.push({ value: "reopen", label: "Reopen" });
+  if (isClosed) {
+    if (canControl) statusOptions.push({ value: "reopen", label: "Reopen" });
+  } else {
+    if (mine && mine.status !== "completed") {
+      if (mine.status !== "in_progress")
+        statusOptions.push({ value: "start", label: "In progress" });
+      statusOptions.push({ value: "complete", label: "Completed" });
+    }
+    if (canControl) statusOptions.push({ value: "cancel", label: "Cancelled" });
   }
 
   async function api(url, method, body, key = "x") {
@@ -89,12 +91,28 @@ export function TaskPageClient({ task, assignees, currentUser }) {
       toast.error(data.error ?? "Something went wrong");
       return false;
     }
-    router.refresh();
+    startTransition(() => router.refresh());
     return true;
   }
 
-  const act = (action, key) =>
-    api(`/api/tasks/${task.id}/transition`, "POST", { action }, key ?? action);
+  // Status switcher: each option maps to a workflow transition. Runs with its
+  // own busy state + transition so the dropdown reacts immediately and the
+  // refresh never blocks the page.
+  async function changeStatus(action) {
+    setStatusSending(true);
+    const res = await fetch(`/api/tasks/${task.id}/transition`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setStatusSending(false);
+    if (!res.ok) {
+      toast.error(data.error ?? "Something went wrong");
+      return;
+    }
+    startStatusTransition(() => router.refresh());
+  }
 
   async function onDelete() {
     const res = await fetch(`/api/tasks/${task.id}`, { method: "DELETE" });
@@ -111,17 +129,6 @@ export function TaskPageClient({ task, assignees, currentUser }) {
   function setAssignees(ids) {
     api(`/api/tasks/${task.id}`, "PATCH", { assigneeIds: ids }, "assignees");
   }
-
-  const addSubtask = async () => {
-    if (!newSub.trim()) return;
-    const ok = await api(
-      `/api/tasks/${task.id}/subtasks`,
-      "POST",
-      { title: newSub },
-      "add-sub"
-    );
-    if (ok) setNewSub("");
-  };
 
   const assigneeIds = task.assignees.map((a) => a.id);
   const doneSubs = task.subtasks.filter((s) => s.status === "done").length;
@@ -165,28 +172,6 @@ export function TaskPageClient({ task, assignees, currentUser }) {
                 </Button>
               }
             />
-          )}
-          {canControl && !isClosed && (
-            <ConfirmButton
-              label="Cancel"
-              icon={Ban}
-              title="Cancel this task?"
-              description="It will be marked cancelled. You can reopen it later."
-              confirmLabel="Cancel task"
-              disabled={!!busy}
-              onConfirm={() => act("cancel")}
-            />
-          )}
-          {canControl && isClosed && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!!busy}
-              onClick={() => act("reopen")}
-            >
-              <RotateCcw className="size-4" />
-              Reopen
-            </Button>
           )}
           {canEdit && (
             <AlertDialog>
@@ -295,31 +280,13 @@ export function TaskPageClient({ task, assignees, currentUser }) {
                 ))}
               </ul>
 
-              {canEdit && (
-                <div className="flex gap-2 pt-1">
-                  <Input
-                    placeholder="Add a subtask…"
-                    value={newSub}
-                    onChange={(e) => setNewSub(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        addSubtask();
-                      }
-                    }}
-                  />
-                  <Button
-                    onClick={addSubtask}
-                    disabled={busy === "add-sub" || !newSub.trim()}
-                  >
-                    {busy === "add-sub" ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <Plus className="size-4" />
-                    )}
-                    Add
-                  </Button>
-                </div>
+              {involved && (
+                <Button asChild variant="outline" className="w-full">
+                  <Link href={`/tasks/${task.key}/subtasks/new`}>
+                    <Plus className="size-4" />
+                    New subtask
+                  </Link>
+                </Button>
               )}
             </CardContent>
           </Card>
@@ -382,18 +349,12 @@ export function TaskPageClient({ task, assignees, currentUser }) {
               <div>
                 <p className="mb-1.5 text-xs text-muted-foreground">Status</p>
                 {statusOptions.length > 0 ? (
-                  <Select onValueChange={(v) => act(v)}>
-                    <SelectTrigger className="w-full">
-                      <StatusBadge status={task.status} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {statusOptions.map((o) => (
-                        <SelectItem key={o.value} value={o.value}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <StatusSelect
+                    status={task.status}
+                    options={statusOptions}
+                    busy={statusBusy}
+                    onSelect={changeStatus}
+                  />
                 ) : (
                   <StatusBadge status={task.status} />
                 )}
@@ -509,44 +470,6 @@ export function TaskPageClient({ task, assignees, currentUser }) {
         </div>
       </div>
     </div>
-  );
-}
-
-function ConfirmButton({
-  label,
-  icon: Icon,
-  title,
-  description,
-  confirmLabel,
-  onConfirm,
-  disabled,
-}) {
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button variant="outline" size="sm" disabled={disabled}>
-          <Icon className="size-4" />
-          {label}
-        </Button>
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Back</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={(e) => {
-              e.preventDefault();
-              onConfirm();
-            }}
-          >
-            {confirmLabel}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }
 

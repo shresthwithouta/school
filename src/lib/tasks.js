@@ -1,5 +1,7 @@
 import crypto from "crypto";
 
+import { after } from "next/server";
+
 import { connectToDatabase, stripMongo } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { cleanHtml } from "@/lib/sanitize";
@@ -293,23 +295,37 @@ function activity(actor, message) {
 
 // ── Visibility & permissions ───────────────────────────────────────
 // Chairman/Director, Principal and Manager (the management tiers) can see
-// every task across the school. Everyone else sees only tasks they created
-// or are assigned to.
+// every task across the school. Everyone else sees only tasks they created,
+// are assigned to, or are assigned a subtask of — a subtask assignee can open
+// the parent task (the subtask URL is /<task>/<subtask>) to do their part.
 function canSeeTask(actor, task) {
   if (canManage(actor.role)) return true;
   return (
     task.assignerId === actor.id ||
-    task.assignees.some((a) => a.id === actor.id)
+    task.assignees.some((a) => a.id === actor.id) ||
+    (task.subtasks || []).some((s) => s.assigneeId === actor.id)
   );
 }
 
-// The creator or any management tier (Chairman/Principal/Manager) can
-// cancel / reopen a task.
-function canControlTask(actor, task) {
-  return actor.id === task.assignerId || canManage(actor.role);
+// "Involved" = anyone collaborating on the task: its creator (assigner), any
+// assignee, or a management tier. These people can drive the task workflow and
+// manage subtasks. Note: a subtask's assignee need not already be on the task —
+// any involved person may assign subtasks to anyone within their own authority.
+function isInvolved(actor, task) {
+  return (
+    actor.id === task.assignerId ||
+    task.assignees.some((a) => a.id === actor.id) ||
+    canManage(actor.role)
+  );
 }
 
-// Only the creator (assigner) may edit/delete the task and its subtasks.
+// Anyone involved in the task can cancel / reopen it (move it through its
+// workflow), not just the creator and management tiers.
+function canControlTask(actor, task) {
+  return isInvolved(actor, task);
+}
+
+// Only the creator (assigner) may edit/delete the task itself.
 function canEdit(actor, task) {
   return actor.id === task.assignerId;
 }
@@ -513,23 +529,26 @@ export async function createTask(
 
   await saveTask(task);
 
-  // Notify assignees (best-effort).
-  await Promise.allSettled(
-    assignees
-      .filter((a) => a.id !== actor.id)
-      .map((a) => {
-        const u = allowed.get(a.id);
-        return u
-          ? emailTaskAssigned({
-              to: u.email,
-              assigneeName: a.name,
-              taskTitle: task.title,
-              assignerName: actor.name,
-              taskId: task.id,
-            })
-          : Promise.resolve();
-      })
-  );
+  // Notify assignees (best-effort, after the response is sent — never blocks the save).
+  const recipients = assignees
+    .filter((a) => a.id !== actor.id)
+    .map((a) => ({ user: allowed.get(a.id), name: a.name }))
+    .filter((r) => r.user);
+  if (recipients.length) {
+    after(() =>
+      Promise.allSettled(
+        recipients.map((r) =>
+          emailTaskAssigned({
+            to: r.user.email,
+            assigneeName: r.name,
+            taskTitle: task.title,
+            assignerName: actor.name,
+            taskId: task.id,
+          })
+        )
+      )
+    );
+  }
 
   return toDTO(task);
 }
@@ -552,7 +571,19 @@ export async function updateTask(
   if (input.description !== undefined) task.description = cleanHtml(input.description);
   if (input.priority !== undefined) task.priority = input.priority;
   if (input.dueDate !== undefined) {
-    task.dueDate = input.dueDate ? new Date(input.dueDate).toISOString() : null;
+    const next = input.dueDate ? new Date(input.dueDate).toISOString() : null;
+    // Only the creator reaches here (canEdit above). Record the change in the
+    // audit log so the team can see who moved the deadline and to when.
+    if (next !== task.dueDate) {
+      const fmt = (d) => (d ? d.slice(0, 10) : "no due date");
+      task.activity.push(
+        activity(
+          actor,
+          `changed the due date from ${fmt(task.dueDate)} to ${fmt(next)}`
+        )
+      );
+      task.dueDate = next;
+    }
   }
   const addedEmails = [];
   if (input.assigneeIds !== undefined) {
@@ -579,17 +610,21 @@ export async function updateTask(
   task.updatedAt = now();
   await saveTask(task);
 
-  await Promise.allSettled(
-    addedEmails.map((r) =>
-      emailTaskAssigned({
-        to: r.to,
-        assigneeName: r.name,
-        taskTitle: task.title,
-        assignerName: actor.name,
-        taskId: task.id,
-      })
-    )
-  );
+  if (addedEmails.length) {
+    after(() =>
+      Promise.allSettled(
+        addedEmails.map((r) =>
+          emailTaskAssigned({
+            to: r.to,
+            assigneeName: r.name,
+            taskTitle: task.title,
+            assignerName: actor.name,
+            taskId: task.id,
+          })
+        )
+      )
+    );
+  }
 
   return toDTO(task);
 }
@@ -693,8 +728,8 @@ export async function addSubtask(
 ) {
   const task = await rawById(taskId);
   if (!task) throw new AppError("Task not found.", 404);
-  if (!canEdit(actor, task)) {
-    throw new AppError("Only the task owner can add subtasks.", 403);
+  if (!isInvolved(actor, task)) {
+    throw new AppError("Only people on this task can add subtasks.", 403);
   }
 
   let assigneeId = null;
@@ -713,6 +748,8 @@ export async function addSubtask(
     id: crypto.randomUUID(),
     key: `SB-${seq}`,
     title: input.title.trim(),
+    description: cleanHtml(input.description),
+    priority: input.priority ?? "medium",
     assigneeId,
     assigneeName,
     expectedDate: input.expectedDate
@@ -740,12 +777,13 @@ export async function updateSubtask(
   const sub = task.subtasks.find((s) => s.id === subId);
   if (!sub) throw new AppError("Subtask not found.", 404);
 
-  const manager = canEdit(actor, task);
+  const involved = isInvolved(actor, task);
   const isSubAssignee = sub.assigneeId === actor.id;
 
-  // Status can be changed by the subtask's assignee or a manager.
+  // Status can be changed by anyone involved in the task or the subtask's own
+  // assignee (who may not otherwise be on the task).
   if (input.status !== undefined) {
-    if (!manager && !isSubAssignee) {
+    if (!involved && !isSubAssignee) {
       throw new AppError("You cannot update this subtask.", 403);
     }
     sub.status = input.status;
@@ -755,16 +793,21 @@ export async function updateSubtask(
     );
   }
 
-  // Title / assignee / expected date are manager-only.
+  // Title / assignee / expected date can be edited by anyone involved in the
+  // task. Assignment is still bounded by the actor's own authority below.
   const wantsMeta =
     input.title !== undefined ||
+    input.description !== undefined ||
+    input.priority !== undefined ||
     input.assigneeId !== undefined ||
     input.expectedDate !== undefined;
   if (wantsMeta) {
-    if (!manager) {
-      throw new AppError("Only the task owner can edit subtask details.", 403);
+    if (!involved) {
+      throw new AppError("Only people on this task can edit subtask details.", 403);
     }
     if (input.title !== undefined) sub.title = input.title.trim();
+    if (input.description !== undefined) sub.description = cleanHtml(input.description);
+    if (input.priority !== undefined) sub.priority = input.priority;
     if (input.expectedDate !== undefined) {
       sub.expectedDate = input.expectedDate
         ? new Date(input.expectedDate).toISOString()
@@ -895,23 +938,26 @@ export async function transitionTask(
   task.updatedAt = now();
   await saveTask(task);
 
-  // Notify the creator when the whole task becomes completed (best-effort).
+  // Notify the creator when the whole task becomes completed
+  // (best-effort, after the response is sent — never blocks the action).
   const nowCompleted = deriveTaskStatus(task) === "completed";
   if (!wasCompleted && nowCompleted) {
-    try {
-      const creator = await store.findById(task.assignerId);
-      if (creator && creator.id !== actor.id) {
-        await emailTaskCompleted({
-          to: creator.email,
-          creatorName: creator.name,
-          taskTitle: task.title,
-          byName: actor.name,
-          taskId: task.id,
-        });
+    after(async () => {
+      try {
+        const creator = await store.findById(task.assignerId);
+        if (creator && creator.id !== actor.id) {
+          await emailTaskCompleted({
+            to: creator.email,
+            creatorName: creator.name,
+            taskTitle: task.title,
+            byName: actor.name,
+            taskId: task.id,
+          });
+        }
+      } catch (err) {
+        console.error("Task notification failed:", err);
       }
-    } catch (err) {
-      console.error("Task notification failed:", err);
-    }
+    });
   }
 
   return toDTO(task);

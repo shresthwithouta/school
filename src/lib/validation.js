@@ -115,15 +115,21 @@ export const commentSchema = z.object({
 
  
 
+// A subtask is a task with a parent — it carries the same core fields
+// (title, rich description, priority) plus a single assignee and a date.
 export const createSubtaskSchema = z.object({
   title: z.string().trim().min(2, "Title is too short").max(140),
+  description: richText,
   assigneeId: z.string().optional().or(z.literal("")),
+  priority: priorityEnum.default("medium"),
   expectedDate: z.string().trim().optional().or(z.literal("")),
 });
 
 export const updateSubtaskSchema = z.object({
   title: z.string().trim().min(2).max(140).optional(),
+  description: richText,
   assigneeId: z.string().optional(),
+  priority: priorityEnum.optional(),
   expectedDate: z.string().optional(),
   status: z.enum(["todo", "in_progress", "done"]).optional(),
 });

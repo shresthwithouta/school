@@ -8,6 +8,11 @@ const transporter = enabled
   ? nodemailer.createTransport({
       service: "gmail",
       auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+      // Keep one SMTP connection warm and reuse it across sends so a burst of
+      // notifications (e.g. assigning many people) doesn't re-handshake each time.
+      pool: true,
+      maxConnections: 3,
+      maxMessages: 100,
     })
   : null;
 

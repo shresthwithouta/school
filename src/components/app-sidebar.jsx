@@ -19,6 +19,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { NavUser } from "@/components/nav-user";
+import { NavProgress } from "@/components/nav-progress";
 import { navForRole } from "@/lib/nav";
 
 
@@ -70,6 +71,7 @@ export function AppSidebar({ user }) {
                       <Link href={item.href}>
                         <item.icon />
                         <span>{item.title}</span>
+                        <NavProgress />
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

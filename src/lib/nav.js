@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   ListChecks,
   CalendarClock,
+  CalendarDays,
   Users,
   BarChart3,
   Settings,
@@ -32,6 +33,7 @@ export const NAV_SECTIONS = [
       { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
       { title: "Tasks", href: "/tasks", icon: ListChecks },
       { title: "Meetings", href: "/meetings", icon: CalendarClock },
+      { title: "Calendar", href: "/calendar", icon: CalendarDays },
     ],
   },
   {

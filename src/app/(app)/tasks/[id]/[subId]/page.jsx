@@ -20,12 +20,21 @@ export default async function SubtaskPage({ params }) {
   const visible = await listAssignableTaskUsers(user);
   const assignees = visible.map((u) => ({ id: u.id, name: u.name, role: u.role }));
 
+  // Anyone involved in the task (creator, an assignee, or a manager) may edit
+  // subtask details and assign them; only the creator may delete a subtask.
+  const isManager = user.tier === "OWNER" || user.tier === "ADMIN";
+  const involved =
+    user.id === task.assignerId ||
+    task.assignees.some((a) => a.id === user.id) ||
+    isManager;
+
   return (
     <SubtaskPageClient
       task={{ id: task.id, key: task.key, title: task.title }}
       sub={sub}
       assignees={assignees}
-      canEdit={user.id === task.assignerId}
+      canEdit={involved}
+      canDelete={user.id === task.assignerId}
       currentUserId={user.id}
     />
   );

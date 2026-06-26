@@ -1,7 +1,9 @@
 import { Skeleton } from "@/components/ui/skeleton";
 
-// Shown while an (app) route's server component awaits its data, so users see a
-// structured placeholder instead of a frozen previous page or a blank screen.
+// Generic fallback for (app) routes that don't ship their own loading.js
+// (detail pages, task form, etc.). Route-level files like tasks/loading.jsx
+// override this with a layout that matches that page exactly. Kept neutral on
+// purpose so it never looks like the "wrong" page while data streams in.
 export default function Loading() {
   return (
     <div className="space-y-6">
@@ -13,15 +15,15 @@ export default function Loading() {
         <Skeleton className="h-9 w-28" />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-24 w-full rounded-xl" />
-        ))}
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Skeleton className="h-72 w-full rounded-xl lg:col-span-2" />
-        <Skeleton className="h-72 w-full rounded-xl" />
+      <div className="space-y-4 rounded-xl border p-6">
+        <Skeleton className="h-5 w-1/3" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-5/6" />
+        <Skeleton className="h-4 w-2/3" />
+        <div className="grid gap-4 pt-2 sm:grid-cols-2">
+          <Skeleton className="h-24 w-full rounded-lg" />
+          <Skeleton className="h-24 w-full rounded-lg" />
+        </div>
       </div>
     </div>
   );
