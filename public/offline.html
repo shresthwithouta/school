@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#4f46e5" />
+    <title>Offline · SWM</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        font-family:
+          system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+          sans-serif;
+        background: #f8fafc;
+        color: #1e1b2e;
+      }
+      .card {
+        max-width: 380px;
+        width: 100%;
+        text-align: center;
+      }
+      .badge {
+        width: 72px;
+        height: 72px;
+        margin: 0 auto 20px;
+        border-radius: 18px;
+        background: linear-gradient(160deg, #6366f1, #4338ca);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .badge svg {
+        width: 40px;
+        height: 40px;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 8px;
+      }
+      p {
+        margin: 0 0 24px;
+        color: #5b5870;
+        line-height: 1.5;
+      }
+      button {
+        appearance: none;
+        border: 0;
+        cursor: pointer;
+        background: #4f46e5;
+        color: #fff;
+        font-size: 15px;
+        font-weight: 600;
+        padding: 11px 22px;
+        border-radius: 10px;
+      }
+      button:hover {
+        background: #4338ca;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="badge">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path
+            d="M5 13l4 4L19 7"
+            stroke="#fff"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </div>
+      <h1>You're offline</h1>
+      <p>
+        SWM needs a connection to load this page. Check your network and try
+        again.
+      </p>
+      <button onclick="location.reload()">Retry</button>
+    </div>
+  </body>
+</html>
