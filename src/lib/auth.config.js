@@ -22,10 +22,12 @@ export const authConfig = {
     // Runs in middleware for every matched request.
     authorized({ auth, request: { nextUrl } }) {
       const isLoggedIn = !!auth?.user;
-      const onLogin = nextUrl.pathname === "/login";
+      const { pathname } = nextUrl;
+      // Public, unauthenticated pages: the marketing landing page and login.
+      const isPublic = pathname === "/" || pathname === "/login";
 
-      if (onLogin) {
-        // Already signed in? Skip the login screen.
+      if (isPublic) {
+        // Signed-in staff skip the landing/login and go straight to the app.
         if (isLoggedIn) return Response.redirect(new URL("/dashboard", nextUrl));
         return true;
       }
