@@ -1,3 +1,4 @@
+import { cache } from "react";
 import bcrypt from "bcryptjs";
 
 import { AppError } from "@/lib/errors";
@@ -76,7 +77,7 @@ async function activeOwnerCount() {
  *   Admin  -> Admins + Workers (not Owners)
  *   Worker -> only themselves
  */
-export async function listVisibleUsers(actor) {
+export const listVisibleUsers = cache(async function listVisibleUsers(actor) {
   const tiers = visibleTiers(actor.role);
 
   if (tiers.length === 0) {
@@ -90,7 +91,7 @@ export async function listVisibleUsers(actor) {
     .filter((u) => roles.has(u.role))
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
     .map(toDTO);
-}
+});
 
 /**
  * People the actor may ASSIGN TASKS to — driven by role rank, not visibility
@@ -98,14 +99,14 @@ export async function listVisibleUsers(actor) {
  * management hides them. Always includes the actor (self-assignment).
  * Inactive accounts are excluded — you can't hand work to a disabled user.
  */
-export async function listAssignableTaskUsers(actor) {
+export const listAssignableTaskUsers = cache(async function listAssignableTaskUsers(actor) {
   const all = await store.list();
   return all
     .filter((u) => u.isActive ?? true)
     .filter((u) => u.id === actor.id || canAssignTaskTo(actor.role, u.role))
     .sort((a, b) => (a.name < b.name ? -1 : 1))
     .map(toDTO);
-}
+});
 
 export async function getUserByIdForActor(
   actor,

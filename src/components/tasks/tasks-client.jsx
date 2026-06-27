@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Search,
@@ -264,21 +264,18 @@ export function TasksClient({ tasks, currentUser }) {
     return c;
   }, [items]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const out = items.filter((t) => {
-      const mine = t.assignees.find((a) => a.id === currentUser.id);
-      if (scope === "mine" && !mine) return false;
-      if (scope === "created" && t.assignerId !== currentUser.id) return false;
-      if (scope === "done-by-me" && !(mine && mine.status === "completed")) return false;
-      if (scope === "drafts" && t.status !== "draft") return false;
-      if (status === "active") {
-        if (t.status !== "in_progress" && t.status !== "assigned") return false;
-      } else if (status !== "all" && t.status !== status) return false;
-      if (priority !== "all" && t.priority !== priority) return false;
-      if (
-        q &&
-        ![
+  // Filtering against the deferred value keeps the input itself responsive on
+  // big lists — React renders the keystroke first, then the heavier filter pass.
+  const deferredQuery = useDeferredValue(query);
+
+  // Precompute a lowercase search string per row ONCE (parsing the HTML
+  // description via toPlainText is the costly part). Without this, every
+  // keystroke re-parsed every description; now typing only does a substring check.
+  const haystacks = useMemo(
+    () =>
+      items.map((t) => ({
+        task: t,
+        hay: [
           t.key,
           t.title,
           t.parentKey,
@@ -288,11 +285,29 @@ export function TasksClient({ tasks, currentUser }) {
           ...t.assignees.map((a) => a.name),
         ]
           .filter(Boolean)
-          .some((v) => v.toLowerCase().includes(q))
-      )
-        return false;
-      return true;
-    });
+          .join(" ")
+          .toLowerCase(),
+      })),
+    [items]
+  );
+
+  const filtered = useMemo(() => {
+    const q = deferredQuery.trim().toLowerCase();
+    const out = haystacks
+      .filter(({ task: t, hay }) => {
+        const mine = t.assignees.find((a) => a.id === currentUser.id);
+        if (scope === "mine" && !mine) return false;
+        if (scope === "created" && t.assignerId !== currentUser.id) return false;
+        if (scope === "done-by-me" && !(mine && mine.status === "completed")) return false;
+        if (scope === "drafts" && t.status !== "draft") return false;
+        if (status === "active") {
+          if (t.status !== "in_progress" && t.status !== "assigned") return false;
+        } else if (status !== "all" && t.status !== status) return false;
+        if (priority !== "all" && t.priority !== priority) return false;
+        if (q && !hay.includes(q)) return false;
+        return true;
+      })
+      .map(({ task }) => task);
 
     const cmp = compareBy(sort);
     const factor = dir === "asc" ? 1 : -1;
@@ -302,7 +317,7 @@ export function TasksClient({ tasks, currentUser }) {
       if (sort === "due" && base !== 0 && (!a.dueDate || !b.dueDate)) return base;
       return base * factor;
     });
-  }, [items, query, scope, status, priority, sort, dir, currentUser.id]);
+  }, [haystacks, deferredQuery, scope, status, priority, sort, dir, currentUser.id]);
 
   return (
     <div className="space-y-4">

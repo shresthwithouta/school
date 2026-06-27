@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { cache } from "react";
 
 import { after } from "next/server";
 
@@ -196,7 +197,10 @@ function canManageMeeting(actor, m) {
 }
 
 // ── Queries ────────────────────────────────────────────────────────
-export async function listVisibleMeetings(
+// Memoized per-request: the dashboard reads the meeting list directly AND via
+// listPendingDecisions, so `cache` turns the two Meeting.find() (+ the user
+// lookups they each trigger) into one. Scoped to a single request — no staleness.
+export const listVisibleMeetings = cache(async function listVisibleMeetings(
   actor
 ) {
   const ids = await visibleUserIds(actor);
@@ -226,7 +230,7 @@ export async function listVisibleMeetings(
       return ax < bx ? 1 : -1;
     })
     .map(toDTO);
-}
+});
 
 /**
  * Open (un-ticked) discussion decisions across meetings the actor is part of —

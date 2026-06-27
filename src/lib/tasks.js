@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { cache } from "react";
 
 import { after } from "next/server";
 
@@ -339,7 +340,10 @@ function canEdit(actor, task) {
 }
 
 // ── Queries ────────────────────────────────────────────────────────
-export async function listVisibleTasks(actor) {
+// Memoized per-request: the dashboard alone asks for the visible task list more
+// than once (directly + via getTaskStats), and `cache` collapses those into a
+// single Task.find() for that request without affecting later requests.
+export const listVisibleTasks = cache(async function listVisibleTasks(actor) {
   await connectToDatabase();
   // Managers (Owner/Admin) see every task, so load all. Everyone else only sees
   // tasks they're connected to — push that filter to Mongo (backed by indexes)
@@ -364,7 +368,7 @@ export async function listVisibleTasks(actor) {
     .filter((t) => canSeeTask(actor, t))
     .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
     .map(toDTO);
-}
+});
 
 export async function getTaskForActor(
   actor,

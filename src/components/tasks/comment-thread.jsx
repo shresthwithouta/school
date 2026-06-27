@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Reply, Send, Paperclip, X } from "lucide-react";
@@ -37,19 +37,75 @@ function PendingAtts({ items, onRemove }) {
   );
 }
 
-// Module-level (stable) component so it isn't recreated on every keystroke,
-// which would remount the reply editor and drop focus after one character.
-function CommentNode({ comment, depth, childrenOf, ctx }) {
-  const {
-    replyTo,
-    setReplyTo,
-    replyText,
-    setReplyText,
-    replyAtts,
-    setReplyAtts,
-    busy,
-    post,
-  } = ctx;
+// A self-contained composer that keeps its draft text/attachments in LOCAL
+// state. Because the draft never lives on the thread, typing here re-renders
+// only this box — not every comment in the thread. Used for both the root
+// comment box and inline replies (replies pass an onCancel).
+function Composer({
+  onSubmit,
+  busy,
+  placeholder,
+  minHeight,
+  submitLabel,
+  onCancel,
+}) {
+  const [text, setText] = useState("");
+  const [atts, setAtts] = useState([]);
+
+  const canSend = !!toPlainText(text) || atts.length > 0;
+
+  const submit = async () => {
+    if (!canSend) return;
+    const ok = await onSubmit(text, atts);
+    if (ok) {
+      setText("");
+      setAtts([]);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <RichTextEditor
+        value={text}
+        onChange={setText}
+        placeholder={placeholder}
+        minHeight={minHeight}
+      />
+      <PendingAtts
+        items={atts}
+        onRemove={(i) => setAtts((a) => a.filter((_, idx) => idx !== i))}
+      />
+      <div className="flex items-center justify-between gap-2">
+        <AttachmentUploader onAdd={(a) => setAtts((prev) => [...prev, a])} />
+        <div className="flex gap-2">
+          {onCancel && (
+            <Button variant="ghost" size="sm" onClick={onCancel}>
+              Cancel
+            </Button>
+          )}
+          <Button
+            size={onCancel ? "sm" : "default"}
+            onClick={submit}
+            disabled={busy || !canSend}
+          >
+            {busy ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Send className="size-4" />
+            )}
+            {submitLabel}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Module-level + memoized so a re-render of the thread (or another node's reply)
+// doesn't re-render every node. Props are stable while typing because the draft
+// state lives inside each Composer, and `ctx` is memoized in the parent.
+const CommentNode = memo(function CommentNode({ comment, depth, childrenOf, ctx }) {
+  const { replyTo, setReplyTo, busy, post } = ctx;
   const replies = childrenOf.get(comment.id) ?? [];
   const isFeedback = comment.kind === "feedback";
   const open = replyTo === comment.id;
@@ -100,52 +156,15 @@ function CommentNode({ comment, depth, childrenOf, ctx }) {
           </button>
 
           {open && (
-            <div className="mt-2 space-y-2">
-              <RichTextEditor
-                value={replyText}
-                onChange={setReplyText}
+            <div className="mt-2">
+              <Composer
+                onSubmit={(text, atts) => post(text, comment.id, atts)}
+                onCancel={() => setReplyTo(null)}
+                busy={busy === comment.id}
                 placeholder={`Reply to ${comment.authorName}…`}
                 minHeight="min-h-14"
+                submitLabel="Reply"
               />
-              <PendingAtts
-                items={replyAtts}
-                onRemove={(i) =>
-                  setReplyAtts((a) => a.filter((_, idx) => idx !== i))
-                }
-              />
-              <div className="flex items-center justify-between gap-2">
-                <AttachmentUploader
-                  onAdd={(a) => setReplyAtts((prev) => [...prev, a])}
-                />
-                <div className="flex gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setReplyTo(null);
-                      setReplyText("");
-                      setReplyAtts([]);
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    size="sm"
-                    disabled={
-                      busy === comment.id ||
-                      (!toPlainText(replyText) && replyAtts.length === 0)
-                    }
-                    onClick={() => post(replyText, comment.id, replyAtts)}
-                  >
-                    {busy === comment.id ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <Send className="size-4" />
-                    )}
-                    Reply
-                  </Button>
-                </div>
-              </div>
             </div>
           )}
 
@@ -166,16 +185,12 @@ function CommentNode({ comment, depth, childrenOf, ctx }) {
       </div>
     </div>
   );
-}
+});
 
 export function CommentThread({ taskId, comments }) {
   const router = useRouter();
   const [busy, setBusy] = useState(null);
-  const [rootText, setRootText] = useState("");
-  const [rootAtts, setRootAtts] = useState([]);
   const [replyTo, setReplyTo] = useState(null);
-  const [replyText, setReplyText] = useState("");
-  const [replyAtts, setReplyAtts] = useState([]);
 
   const childrenOf = useMemo(() => {
     const map = new Map();
@@ -190,42 +205,39 @@ export function CommentThread({ taskId, comments }) {
     return map;
   }, [comments]);
 
-  async function post(text, parentId, attachments) {
-    if (!toPlainText(text) && attachments.length === 0) return;
-    setBusy(parentId ?? "root");
-    const res = await fetch(`/api/tasks/${taskId}/comments`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, parentId: parentId ?? "", attachments }),
-    });
-    const data = await res.json().catch(() => ({}));
-    setBusy(null);
-    if (!res.ok) {
-      toast.error(data.error ?? "Could not post comment");
-      return;
-    }
-    if (parentId) {
-      setReplyTo(null);
-      setReplyText("");
-      setReplyAtts([]);
-    } else {
-      setRootText("");
-      setRootAtts([]);
-    }
-    router.refresh();
-  }
+  // Stable across keystrokes (only taskId/router are deps), so memoized
+  // CommentNodes don't re-render while someone is typing a comment. Returns
+  // whether the post succeeded so the Composer can clear itself.
+  const post = useCallback(
+    async (text, parentId, attachments) => {
+      if (!toPlainText(text) && attachments.length === 0) return false;
+      setBusy(parentId ?? "root");
+      const res = await fetch(`/api/tasks/${taskId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, parentId: parentId ?? "", attachments }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setBusy(null);
+      if (!res.ok) {
+        toast.error(data.error ?? "Could not post comment");
+        return false;
+      }
+      if (parentId) setReplyTo(null);
+      router.refresh();
+      return true;
+    },
+    [taskId, router]
+  );
 
   const roots = childrenOf.get(null) ?? [];
-  const ctx = {
-    replyTo,
-    setReplyTo,
-    replyText,
-    setReplyText,
-    replyAtts,
-    setReplyAtts,
-    busy,
-    post,
-  };
+
+  // Memoized context handed to every node — only changes when the open reply or
+  // busy state changes, not on every keystroke (drafts live inside Composer).
+  const ctx = useMemo(
+    () => ({ replyTo, setReplyTo, busy, post }),
+    [replyTo, busy, post]
+  );
 
   return (
     <div className="space-y-4">
@@ -245,31 +257,14 @@ export function CommentThread({ taskId, comments }) {
         </div>
       )}
 
-      <div className="space-y-2 border-t pt-3">
-        <RichTextEditor
-          value={rootText}
-          onChange={setRootText}
+      <div className="border-t pt-3">
+        <Composer
+          onSubmit={(text, atts) => post(text, null, atts)}
+          busy={busy === "root"}
           placeholder="Write a comment…"
           minHeight="min-h-16"
+          submitLabel="Comment"
         />
-        <PendingAtts
-          items={rootAtts}
-          onRemove={(i) => setRootAtts((a) => a.filter((_, idx) => idx !== i))}
-        />
-        <div className="flex items-center justify-between gap-2">
-          <AttachmentUploader onAdd={(a) => setRootAtts((prev) => [...prev, a])} />
-          <Button
-            onClick={() => post(rootText, null, rootAtts)}
-            disabled={busy === "root" || (!toPlainText(rootText) && rootAtts.length === 0)}
-          >
-            {busy === "root" ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Send className="size-4" />
-            )}
-            Comment
-          </Button>
-        </div>
       </div>
     </div>
   );
