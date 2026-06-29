@@ -127,3 +127,8 @@ scripts/seed.js              # Seed demo accounts + print logins
   the UI hiding an action is never the only line of defense.
 - The Edge `proxy` only verifies the signed session cookie; Mongoose/bcrypt stay
   in the Node runtime (Auth.js split-config pattern).
+
+
+MONGODB - SHRESTH 
+VERCEL - SHRESTH 
+GOOGLE SERVICE - 

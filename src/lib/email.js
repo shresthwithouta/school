@@ -52,11 +52,7 @@ function layout(title, body, cta) {
 }
 
 /** Sends an email via Gmail SMTP. Silently skips (logs) when Gmail isn't set. */
-export async function sendEmail(opts
-
-
-
-) {
+export async function sendEmail(opts) {
   if (!transporter) {
     console.log(`[email skipped — Gmail not configured] "${opts.subject}" -> ${opts.to}`);
     return;
@@ -85,14 +81,7 @@ export function meetingUrl(meetingId) {
   return `${baseUrl()}/meetings/${meetingId}`;
 }
 
-export async function emailMeetingInvite(args
-
-
-
-
-
-
-) {
+export async function emailMeetingInvite(args) {
   await sendEmail({
     to: args.to,
     subject: `Meeting invite: ${args.title}`,
@@ -106,13 +95,7 @@ export async function emailMeetingInvite(args
   });
 }
 
-export async function emailTaskAssigned(args
-
-
-
-
-
-) {
+export async function emailTaskAssigned(args) {
   await sendEmail({
     to: args.to,
     subject: `You've been assigned: ${args.taskTitle}`,
@@ -124,8 +107,7 @@ export async function emailTaskAssigned(args
   });
 }
 
-export async function emailSubtaskAssigned(args
-) {
+export async function emailSubtaskAssigned(args) {
   await sendEmail({
     to: args.to,
     subject: `You've been assigned a subtask: ${args.subtaskTitle}`,
@@ -137,13 +119,7 @@ export async function emailSubtaskAssigned(args
   });
 }
 
-export async function emailTaskCompleted(args
-
-
-
-
-
-) {
+export async function emailTaskCompleted(args) {
   await sendEmail({
     to: args.to,
     subject: `Completed: ${args.taskTitle}`,
