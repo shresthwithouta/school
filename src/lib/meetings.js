@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { cache } from "react";
 
 import { after } from "next/server";
 
@@ -6,6 +7,7 @@ import { connectToDatabase, stripMongo } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { cleanHtml } from "@/lib/sanitize";
 import { emailMeetingInvite, emailMeetingInviteGroup } from "@/lib/email";
+import { pushMeetingInvite } from "@/lib/push";
 import { canManage, isOwner } from "@/lib/rbac";
 import { listVisibleUsers } from "@/lib/users";
 import { destroyAsset } from "@/lib/cloudinary";
@@ -196,7 +198,10 @@ function canManageMeeting(actor, m) {
 }
 
 // ── Queries ────────────────────────────────────────────────────────
-export async function listVisibleMeetings(
+// Memoized per-request: the dashboard reads the meeting list directly AND via
+// listPendingDecisions, so `cache` turns the two Meeting.find() (+ the user
+// lookups they each trigger) into one. Scoped to a single request — no staleness.
+export const listVisibleMeetings = cache(async function listVisibleMeetings(
   actor
 ) {
   const ids = await visibleUserIds(actor);
@@ -226,7 +231,7 @@ export async function listVisibleMeetings(
       return ax < bx ? 1 : -1;
     })
     .map(toDTO);
-}
+});
 
 /**
  * Open (un-ticked) discussion decisions across meetings the actor is part of —
@@ -276,9 +281,11 @@ export async function getMeetingForActor(
 // Invite notifications. One invitee → a personalized email. Several at once →
 // a single email to the organizer with everyone in CC, so the group can see who
 // else is invited (instead of N isolated emails). Always carries the schedule
-// and the join link. `recipients` is [{ email, name }] and excludes the actor.
-function sendInviteEmails(actor, meeting, recipients) {
-  const valid = recipients.filter((r) => r.email);
+// and the join link. Each invitee also gets a web-push notification (best-effort
+// — no-ops when VAPID isn't configured). `recipients` is [{ id, email, name }]
+// and excludes the actor.
+function sendInviteNotifications(actor, meeting, recipients) {
+  const valid = recipients.filter((r) => r.email || r.id);
   if (valid.length === 0) return Promise.resolve();
   const when = meeting.scheduledAt
     ? new Date(meeting.scheduledAt).toLocaleString("en-GB")
@@ -290,15 +297,36 @@ function sendInviteEmails(actor, meeting, recipients) {
     when,
     link: meeting.link || "",
   };
-  if (valid.length === 1) {
-    return emailMeetingInvite({ ...base, to: valid[0].email, attendeeName: valid[0].name });
+  const withEmail = valid.filter((r) => r.email);
+  const tasks = [];
+  if (withEmail.length === 1) {
+    tasks.push(
+      emailMeetingInvite({ ...base, to: withEmail[0].email, attendeeName: withEmail[0].name })
+    );
+  } else if (withEmail.length > 1) {
+    tasks.push(
+      emailMeetingInviteGroup({
+        ...base,
+        to: actor.email,
+        cc: withEmail.map((r) => r.email),
+        attendeeNames: withEmail.map((r) => r.name).join(", "),
+      })
+    );
   }
-  return emailMeetingInviteGroup({
-    ...base,
-    to: actor.email,
-    cc: valid.map((r) => r.email),
-    attendeeNames: valid.map((r) => r.name).join(", "),
-  });
+  for (const r of valid) {
+    if (r.id) {
+      tasks.push(
+        pushMeetingInvite({
+          userId: r.id,
+          title: meeting.title,
+          byName: actor.name,
+          meetingId: meeting.id,
+          when,
+        })
+      );
+    }
+  }
+  return Promise.allSettled(tasks);
 }
 
 export async function createMeeting(
@@ -347,10 +375,9 @@ export async function createMeeting(
   // there's more than one invitee.
   const invites = attendees
     .filter((a) => a.id !== actor.id)
-    .map((a) => ({ email: allowed.get(a.id)?.email, name: a.name }))
-    .filter((r) => r.email);
+    .map((a) => ({ id: a.id, email: allowed.get(a.id)?.email, name: a.name }));
   if (invites.length) {
-    after(() => sendInviteEmails(actor, meeting, invites));
+    after(() => sendInviteNotifications(actor, meeting, invites));
   }
 
   return toDTO(meeting);
@@ -389,7 +416,7 @@ export async function updateMeeting(
       const cur = existing.get(cid);
       if (cur) return cur;
       const u = allowed.get(cid);
-      if (u.id !== actor.id) newlyInvited.push({ email: u.email, name: u.name });
+      if (u.id !== actor.id) newlyInvited.push({ id: u.id, email: u.email, name: u.name });
       return { id: u.id, name: u.name, role: u.role, status: "invited", joinedAt: null };
     });
   }
@@ -398,7 +425,7 @@ export async function updateMeeting(
   await save(m);
 
   if (newlyInvited.length) {
-    after(() => sendInviteEmails(actor, m, newlyInvited));
+    after(() => sendInviteNotifications(actor, m, newlyInvited));
   }
 
   return toDTO(m);

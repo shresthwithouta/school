@@ -81,15 +81,19 @@ shared with them. Saving/sharing/deleting are all Owner-gated server-side.
 `npm run lint && npm run build` — both must pass.
 
 ## Built
-Auth + roles, dashboards, team mgmt, profiles (photo upload), Tasks (multi-assignee
-lifecycle with **submit-for-review → approve/send-back**, bulk-assign by role,
-subtasks, rich text, threaded replies, **private submission files**, **private
-@mention comments**, audit log), Analytics (/reports), Files/voice (Cloudinary),
-Email (Gmail SMTP via nodemailer — HTML; group-CC assignment + meeting invites +
-review notices), Meetings (group-CC invite with join **link** + agenda, messages,
-decisions/action points any participant can add/close — tracks **who closed** —
-open ones surface on the dashboard), Calendar (tasks + meetings + my subtasks),
-Settings (profile + password).
+lifecycle with **submit-for-review → approve/send-back** (subtasks too — only the
+subtask creator closes), bulk-assign by role, subtasks, rich text, threaded
+replies, **private submission files**, **private @mention comments**, audit log),
+**File Repository** (`/repository`; Chairman saves/shares/deletes files), Analytics
+(/reports), Files/voice (Cloudinary), Email (Gmail SMTP via nodemailer — HTML;
+group-CC assignment + meeting invites + review notices), Web Push (VAPID via
+`web-push`; `src/lib/push.js` mirrors `email.js` and fires on the same
+task/subtask/meeting events — opt-in per device under Settings → Notifications;
+subscriptions in `models/PushSubscription.js`; SW `push`/`notificationclick`
+handlers in `public/sw.js`), Meetings (group-CC invite with join **link** +
+agenda, messages, decisions/action points any participant can add/close — tracks
+**who closed** — open ones surface on the dashboard), Calendar (tasks + meetings +
+my subtasks), Settings (profile + password + notifications).
 
 ## Roadmap (still ComingSoon)
 Events, recurring/reminders, task evaluation scoring (Timeliness/Quality/Accuracy),

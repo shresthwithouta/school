@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { memo, useEffect } from "react";
 import { useEditor, EditorContent, } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
@@ -146,8 +146,14 @@ export function RichTextEditor({
   );
 }
 
-/** Renders stored (already-sanitized) rich-text HTML. */
-export function RichText({
+/**
+ * Renders stored (already-sanitized) rich-text HTML.
+ *
+ * Memoized: this shows up many times per page (every comment, every description)
+ * and `cn()` runs twMerge on each render. Without memo, typing anywhere in a
+ * parent (e.g. a comment composer) re-runs all of those for no reason.
+ */
+export const RichText = memo(function RichText({
   html,
   className,
 }
@@ -161,4 +167,4 @@ export function RichText({
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
-}
+});

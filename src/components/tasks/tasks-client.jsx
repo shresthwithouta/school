@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Search,
@@ -9,7 +9,6 @@ import {
   ArrowDownUp,
   ArrowUp,
   ArrowDown,
-  ChevronRight,
   ChevronDown,
   CornerDownRight,
   ListTree,
@@ -263,15 +262,46 @@ export function TasksClient({ tasks, currentUser }) {
     return c;
   }, [tasks]);
 
+  // Filtering runs against the deferred query so the input stays responsive on
+  // big lists — React paints the keystroke first, then the heavier filter pass.
+  const deferredQuery = useDeferredValue(query);
+
+  // Precompute a lowercase search string per task and per subtask ONCE. Parsing
+  // each HTML description via toPlainText is the costly part; without this, every
+  // keystroke re-parsed every description. Now typing is just a substring check.
+  const searchIndex = useMemo(() => {
+    const map = new Map();
+    for (const t of tasks) {
+      const taskHay = [
+        t.key,
+        t.title,
+        toPlainText(t.description),
+        t.assignerName,
+        ...t.assignees.map((a) => a.name),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      const subHays = (t.subtasks || []).map((s) =>
+        [s.key, s.title, t.key, t.title, toPlainText(s.description), s.assigneeName, t.assignerName]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+      );
+      map.set(t.id, { taskHay, subHays });
+    }
+    return map;
+  }, [tasks]);
+
   // The list shows top-level tasks only; subtasks live nested inside their
-  // parent. A task is included when it matches the filters itself OR when any
-  // of its subtasks does — in which case we auto-expand it so the match shows.
+  // parent. A task is included when it matches the filters itself OR when any of
+  // its subtasks does — in which case we auto-expand it so the match is visible.
   const { list, autoExpand } = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     const filterActive =
       q !== "" || scope !== "all" || status !== "all" || priority !== "all";
 
-    const taskMatches = (t) => {
+    const taskMatches = (t, taskHay) => {
       const mine = t.assignees.find((a) => a.id === currentUser.id);
       if (scope === "mine" && !mine) return false;
       if (scope === "created" && t.assignerId !== currentUser.id) return false;
@@ -281,17 +311,11 @@ export function TasksClient({ tasks, currentUser }) {
         if (t.status !== "in_progress" && t.status !== "assigned") return false;
       } else if (status !== "all" && t.status !== status) return false;
       if (priority !== "all" && t.priority !== priority) return false;
-      if (
-        q &&
-        ![t.key, t.title, toPlainText(t.description), t.assignerName, ...t.assignees.map((a) => a.name)]
-          .filter(Boolean)
-          .some((v) => v.toLowerCase().includes(q))
-      )
-        return false;
+      if (q && !taskHay.includes(q)) return false;
       return true;
     };
 
-    const subtaskMatches = (t, s) => {
+    const subtaskMatches = (t, s, subHay) => {
       const r = subtaskToRow(t, s);
       const mine = s.assigneeId === currentUser.id;
       if (scope === "mine" && !mine) return false;
@@ -302,20 +326,16 @@ export function TasksClient({ tasks, currentUser }) {
         if (r.status !== "in_progress" && r.status !== "assigned") return false;
       } else if (status !== "all" && r.status !== status) return false;
       if (priority !== "all" && r.priority !== priority) return false;
-      if (
-        q &&
-        ![s.key, s.title, t.key, t.title, toPlainText(s.description), s.assigneeName, t.assignerName]
-          .filter(Boolean)
-          .some((v) => v.toLowerCase().includes(q))
-      )
-        return false;
+      if (q && !subHay.includes(q)) return false;
       return true;
     };
 
     const auto = new Set();
     const out = tasks.filter((t) => {
-      const own = taskMatches(t);
-      const subHit = (t.subtasks || []).some((s) => subtaskMatches(t, s));
+      const idx = searchIndex.get(t.id);
+      const own = taskMatches(t, idx.taskHay);
+      const subs = t.subtasks || [];
+      const subHit = subs.some((s, i) => subtaskMatches(t, s, idx.subHays[i]));
       if (filterActive && subHit) auto.add(t.id);
       return own || subHit;
     });
@@ -329,7 +349,7 @@ export function TasksClient({ tasks, currentUser }) {
       return base * factor;
     });
     return { list: out, autoExpand: auto };
-  }, [tasks, query, scope, status, priority, sort, dir, currentUser.id]);
+  }, [tasks, searchIndex, deferredQuery, scope, status, priority, sort, dir, currentUser.id]);
 
   // Parents that actually have subtasks — drives the per-row expander and the
   // "Expand all" control.
@@ -506,130 +526,165 @@ export function TasksClient({ tasks, currentUser }) {
           </p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border bg-card">
-          {/* Column header (desktop) */}
-          <div className="hidden items-center gap-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground md:flex">
-            <span className="w-20 shrink-0">Key</span>
-            <span className="flex-1">Task</span>
-            <span className="w-28 shrink-0">Due</span>
-            <span className="w-20 shrink-0 text-right">People</span>
-          </div>
-          <ul className="divide-y">
-            {list.map((t) => {
-              const subs = t.subtasks || [];
-              const hasSubs = subs.length > 0;
-              const open = hasSubs && (expanded.has(t.id) || autoExpand.has(t.id));
-              return (
-                <li key={t.id} className={cn(open && "bg-muted/20")}>
-                  <Link
-                    href={`/tasks/${t.key}`}
-                    className="group/row flex items-center gap-3 px-3 py-3 transition-colors hover:bg-accent/60 sm:px-4"
-                  >
-                    <span className="hidden w-20 shrink-0 font-mono text-xs font-medium text-muted-foreground md:inline">
-                      {t.key}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <span className="block truncate font-medium">{t.title}</span>
-                      <div className="mt-1 flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-[11px] text-muted-foreground md:hidden">
+        <div className="overflow-x-auto rounded-xl border bg-card">
+          <div className="min-w-[680px]">
+            {/* Column header */}
+            <div className="flex items-center gap-3 border-b bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground sm:px-4">
+              <span className="flex-1">Issue</span>
+              <span className="w-28 shrink-0">Status</span>
+              <span className="w-24 shrink-0">Due</span>
+              <span className="w-24 shrink-0">Priority</span>
+              <span className="w-20 shrink-0">Assignees</span>
+              <span className="w-20 shrink-0">Subtasks</span>
+            </div>
+            <ul className="divide-y">
+              {list.map((t) => {
+                const subs = t.subtasks || [];
+                const hasSubs = subs.length > 0;
+                const open = hasSubs && (expanded.has(t.id) || autoExpand.has(t.id));
+                return (
+                  <li key={t.id} className={cn(open && "bg-muted/20")}>
+                    {/* Parent row — the whole row navigates via the stretched
+                        link; the Subtasks cell sits above it to toggle expand. */}
+                    <div className="group/row relative flex items-center gap-3 px-3 py-3 transition-colors hover:bg-accent/60 sm:px-4">
+                      <Link href={`/tasks/${t.key}`} className="absolute inset-0 z-[1]">
+                        <span className="sr-only">Open {t.title}</span>
+                      </Link>
+                      <div className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">{t.title}</span>
+                        <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
                           {t.key}
                         </span>
+                      </div>
+                      <div className="w-28 shrink-0">
                         <StatusBadge status={t.status} />
+                      </div>
+                      <div className="w-24 shrink-0">
+                        {t.dueDate ? (
+                          <>
+                            <span
+                              className={cn(
+                                "text-xs",
+                                t.delayed
+                                  ? "font-medium text-rose-600 dark:text-rose-400"
+                                  : "text-muted-foreground"
+                              )}
+                            >
+                              {formatDate(t.dueDate)}
+                            </span>
+                            {t.delayed && t.daysLate > 0 && (
+                              <span className="block text-[10px] font-medium text-rose-600 dark:text-rose-400">
+                                {t.daysLate}d late
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-xs text-muted-foreground/50">—</span>
+                        )}
+                      </div>
+                      <div className="w-24 shrink-0">
                         <PriorityBadge priority={t.priority} />
-                        {t.delayed && t.daysLate > 0 && (
-                          <span className="text-xs font-medium text-rose-600 dark:text-rose-400">
-                            {t.daysLate}d late
-                          </span>
+                      </div>
+                      <div className="w-20 shrink-0">
+                        <AssigneeStack task={t} />
+                      </div>
+                      <div className="w-20 shrink-0">
+                        {hasSubs ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleExpanded(t.id)}
+                            aria-expanded={open}
+                            aria-label={open ? "Hide subtasks" : `Show ${subs.length} subtasks`}
+                            className="relative z-[2] inline-flex items-center gap-1 rounded-md border border-transparent px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-foreground"
+                          >
+                            <span className="tabular-nums">{subs.length}</span>
+                            <ChevronDown
+                              className={cn(
+                                "size-3.5 transition-transform",
+                                open && "rotate-180"
+                              )}
+                            />
+                          </button>
+                        ) : (
+                          <span className="pl-2 text-xs text-muted-foreground/40">—</span>
                         )}
                       </div>
                     </div>
-                    <span
-                      className={cn(
-                        "hidden w-28 shrink-0 text-xs md:inline",
-                        t.delayed
-                          ? "font-medium text-rose-600 dark:text-rose-400"
-                          : "text-muted-foreground"
-                      )}
-                    >
-                      {t.dueDate ? formatDate(t.dueDate) : null}
-                    </span>
-                    <div className="flex w-20 shrink-0 justify-end">
-                      <AssigneeStack task={t} />
-                    </div>
-                    <ChevronRight className="size-4 shrink-0 text-muted-foreground/40 transition-all group-hover/row:translate-x-0.5 group-hover/row:text-primary" />
-                  </Link>
 
-                  {hasSubs && (
-                    <button
-                      type="button"
-                      onClick={() => toggleExpanded(t.id)}
-                      aria-expanded={open}
-                      className="flex w-full items-center gap-1.5 pb-2.5 pl-8 pr-3 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground sm:pl-12 sm:pr-4"
-                    >
-                      <ChevronDown
-                        className={cn(
-                          "size-3.5 transition-transform",
-                          open && "rotate-180"
-                        )}
-                      />
-                      {open
-                        ? "Hide subtasks"
-                        : `See all ${subs.length} ${subs.length === 1 ? "subtask" : "subtasks"}`}
-                    </button>
-                  )}
-
-                  {open && (
-                    <ul className="border-t bg-muted/10">
-                      {subs.map((s) => {
-                        const r = subtaskToRow(t, s);
-                        return (
-                          <li key={r.id}>
-                            <Link
-                              href={r.href}
-                              className="group/sub flex items-center gap-3 py-2.5 pl-8 pr-3 transition-colors hover:bg-accent/50 sm:pl-12 sm:pr-4"
-                            >
-                              <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground/70" />
-                              <div className="min-w-0 flex-1">
-                                <span className="block truncate text-sm font-medium">
-                                  {r.title}
-                                </span>
-                                <div className="mt-1 flex flex-wrap items-center gap-2">
-                                  <span className="font-mono text-[11px] text-muted-foreground md:hidden">
-                                    {r.key}
-                                  </span>
-                                  <StatusBadge status={r.status} />
-                                  <PriorityBadge priority={r.priority} />
-                                  {r.delayed && r.daysLate > 0 && (
-                                    <span className="text-xs font-medium text-rose-600 dark:text-rose-400">
-                                      {r.daysLate}d late
-                                    </span>
-                                  )}
+                    {/* Nested subtasks — same columns, indented with a tree rail
+                        so they clearly read as children of the task above. */}
+                    {open && (
+                      <div className="relative border-t bg-muted/20">
+                        <span
+                          aria-hidden
+                          className="pointer-events-none absolute inset-y-0 left-8 w-px bg-border sm:left-12"
+                        />
+                        <ul className="divide-y divide-border/40">
+                          {subs.map((s) => {
+                            const r = subtaskToRow(t, s);
+                            return (
+                              <li key={r.id} className="group/sub relative">
+                                <Link href={r.href} className="absolute inset-0 z-[1]">
+                                  <span className="sr-only">Open {r.title}</span>
+                                </Link>
+                                <div className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-accent/40 sm:px-4">
+                                  <div className="flex min-w-0 flex-1 items-center gap-2 pl-6 sm:pl-9">
+                                    <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground/60" />
+                                    <div className="min-w-0">
+                                      <span className="block truncate text-sm font-medium">
+                                        {r.title}
+                                      </span>
+                                      <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
+                                        {r.key}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="w-28 shrink-0">
+                                    <StatusBadge status={r.status} />
+                                  </div>
+                                  <div className="w-24 shrink-0">
+                                    {r.dueDate ? (
+                                      <>
+                                        <span
+                                          className={cn(
+                                            "text-xs",
+                                            r.delayed
+                                              ? "font-medium text-rose-600 dark:text-rose-400"
+                                              : "text-muted-foreground"
+                                          )}
+                                        >
+                                          {formatDate(r.dueDate)}
+                                        </span>
+                                        {r.delayed && r.daysLate > 0 && (
+                                          <span className="block text-[10px] font-medium text-rose-600 dark:text-rose-400">
+                                            {r.daysLate}d late
+                                          </span>
+                                        )}
+                                      </>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground/50">—</span>
+                                    )}
+                                  </div>
+                                  <div className="w-24 shrink-0">
+                                    <PriorityBadge priority={r.priority} />
+                                  </div>
+                                  <div className="w-20 shrink-0">
+                                    <AssigneeStack task={r} />
+                                  </div>
+                                  {/* Subtasks column — subtasks have none */}
+                                  <div className="w-20 shrink-0" />
                                 </div>
-                              </div>
-                              <span
-                                className={cn(
-                                  "hidden w-28 shrink-0 text-xs md:inline",
-                                  r.delayed
-                                    ? "font-medium text-rose-600 dark:text-rose-400"
-                                    : "text-muted-foreground"
-                                )}
-                              >
-                                {r.dueDate ? formatDate(r.dueDate) : null}
-                              </span>
-                              <div className="flex w-20 shrink-0 justify-end">
-                                <AssigneeStack task={r} />
-                              </div>
-                              <ChevronRight className="size-4 shrink-0 text-muted-foreground/40 transition-all group-hover/sub:translate-x-0.5 group-hover/sub:text-primary" />
-                            </Link>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         </div>
       )}
     </div>

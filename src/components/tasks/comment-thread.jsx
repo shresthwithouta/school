@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Reply, Send, Paperclip, X, Lock } from "lucide-react";
@@ -40,20 +40,45 @@ function PendingAtts({ items, onRemove }) {
   );
 }
 
-// A reusable composer: rich-text + attachments + an @mention picker. The mention
-// picker is only offered to people who can post private mentions (the creator);
-// for everyone else mentions just notify, so we keep the box simpler.
-function Composer({ ctx, value, setValue, atts, setAtts, mentions, setMentions, placeholder, minHeight, submitting, onSubmit, submitLabel }) {
-  const { participants, currentUser, isCreator } = ctx;
+// A self-contained composer that keeps its draft text/attachments/mentions in
+// LOCAL state. Because the draft never lives on the thread, typing here
+// re-renders only this box — not every comment. Used for the root box and inline
+// replies (replies pass an onCancel). When the author can post private mentions
+// (the creator), it shows an @mention picker and enforces the 50-char minimum.
+function Composer({
+  onSubmit,
+  busy,
+  placeholder,
+  minHeight,
+  submitLabel,
+  onCancel,
+  participants = [],
+  currentUserId,
+  isCreator = false,
+}) {
+  const [text, setText] = useState("");
+  const [atts, setAtts] = useState([]);
+  const [mentions, setMentions] = useState([]);
+
   const tooShort =
-    mentions.length > 0 && toPlainText(value).length < MENTION_MIN_CHARS;
-  const empty = !toPlainText(value) && atts.length === 0;
+    mentions.length > 0 && toPlainText(text).length < MENTION_MIN_CHARS;
+  const canSend = (!!toPlainText(text) || atts.length > 0) && !tooShort;
+
+  const submit = async () => {
+    if (!canSend) return;
+    const ok = await onSubmit(text, atts, mentions);
+    if (ok) {
+      setText("");
+      setAtts([]);
+      setMentions([]);
+    }
+  };
 
   return (
     <div className="space-y-2">
       <RichTextEditor
-        value={value}
-        onChange={setValue}
+        value={text}
+        onChange={setText}
         placeholder={placeholder}
         minHeight={minHeight}
       />
@@ -66,7 +91,7 @@ function Composer({ ctx, value, setValue, atts, setAtts, mentions, setMentions, 
           participants={participants}
           value={mentions}
           onChange={setMentions}
-          excludeId={currentUser?.id}
+          excludeId={currentUserId}
         />
       )}
       {mentions.length > 0 && (
@@ -78,38 +103,43 @@ function Composer({ ctx, value, setValue, atts, setAtts, mentions, setMentions, 
       )}
       <div className="flex items-center justify-between gap-2">
         <AttachmentUploader onAdd={(a) => setAtts((prev) => [...prev, a])} />
-        <Button
-          size="sm"
-          disabled={submitting || empty || tooShort}
-          onClick={onSubmit}
-        >
-          {submitting ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <Send className="size-4" />
+        <div className="flex gap-2">
+          {onCancel && (
+            <Button variant="ghost" size="sm" onClick={onCancel}>
+              Cancel
+            </Button>
           )}
-          {submitLabel}
-        </Button>
+          <Button
+            size={onCancel ? "sm" : "default"}
+            onClick={submit}
+            disabled={busy || !canSend}
+          >
+            {busy ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Send className="size-4" />
+            )}
+            {submitLabel}
+          </Button>
+        </div>
       </div>
     </div>
   );
 }
 
-// Module-level (stable) component so it isn't recreated on every keystroke,
-// which would remount the reply editor and drop focus after one character.
-function CommentNode({ comment, depth, childrenOf, ctx }) {
+// Module-level + memoized so a re-render of the thread (or another node's reply)
+// doesn't re-render every node. Props are stable while typing because the draft
+// state lives inside each Composer, and `ctx` is memoized in the parent.
+const CommentNode = memo(function CommentNode({ comment, depth, childrenOf, ctx }) {
   const {
     replyTo,
     setReplyTo,
-    replyText,
-    setReplyText,
-    replyAtts,
-    setReplyAtts,
-    replyMentions,
-    setReplyMentions,
     busy,
     post,
     nameOf,
+    participants,
+    currentUserId,
+    isCreator,
   } = ctx;
   const replies = childrenOf.get(comment.id) ?? [];
   const isFeedback = comment.kind === "feedback";
@@ -185,31 +215,18 @@ function CommentNode({ comment, depth, childrenOf, ctx }) {
           {open && (
             <div className="mt-2">
               <Composer
-                ctx={ctx}
-                value={replyText}
-                setValue={setReplyText}
-                atts={replyAtts}
-                setAtts={setReplyAtts}
-                mentions={replyMentions}
-                setMentions={setReplyMentions}
+                onSubmit={(text, atts, mentions) =>
+                  post(text, comment.id, atts, mentions)
+                }
+                onCancel={() => setReplyTo(null)}
+                busy={busy === comment.id}
                 placeholder={`Reply to ${comment.authorName}…`}
                 minHeight="min-h-14"
-                submitting={busy === comment.id}
                 submitLabel="Reply"
-                onSubmit={() => post(replyText, comment.id, replyAtts, replyMentions)}
+                participants={participants}
+                currentUserId={currentUserId}
+                isCreator={isCreator}
               />
-              <button
-                type="button"
-                onClick={() => {
-                  setReplyTo(null);
-                  setReplyText("");
-                  setReplyAtts([]);
-                  setReplyMentions([]);
-                }}
-                className="mt-1 text-xs text-muted-foreground hover:text-foreground"
-              >
-                Cancel
-              </button>
             </div>
           )}
 
@@ -230,7 +247,7 @@ function CommentNode({ comment, depth, childrenOf, ctx }) {
       </div>
     </div>
   );
-}
+});
 
 export function CommentThread({
   taskId,
@@ -241,13 +258,7 @@ export function CommentThread({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(null);
-  const [rootText, setRootText] = useState("");
-  const [rootAtts, setRootAtts] = useState([]);
-  const [rootMentions, setRootMentions] = useState([]);
   const [replyTo, setReplyTo] = useState(null);
-  const [replyText, setReplyText] = useState("");
-  const [replyAtts, setReplyAtts] = useState([]);
-  const [replyMentions, setReplyMentions] = useState([]);
 
   const nameOf = useMemo(
     () => new Map(participants.map((p) => [p.id, p.name])),
@@ -267,55 +278,55 @@ export function CommentThread({
     return map;
   }, [comments]);
 
-  async function post(text, parentId, attachments, mentions) {
-    if (!toPlainText(text) && attachments.length === 0) return;
-    setBusy(parentId ?? "root");
-    const res = await fetch(`/api/tasks/${taskId}/comments`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text,
-        parentId: parentId ?? "",
-        attachments,
-        mentions: mentions ?? [],
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    setBusy(null);
-    if (!res.ok) {
-      toast.error(data.error ?? "Could not post comment");
-      return;
-    }
-    if (parentId) {
-      setReplyTo(null);
-      setReplyText("");
-      setReplyAtts([]);
-      setReplyMentions([]);
-    } else {
-      setRootText("");
-      setRootAtts([]);
-      setRootMentions([]);
-    }
-    router.refresh();
-  }
+  // Stable across keystrokes (only taskId/router are deps), so memoized
+  // CommentNodes don't re-render while someone is typing. Returns whether the
+  // post succeeded so the Composer can clear itself.
+  const post = useCallback(
+    async (text, parentId, attachments, mentions) => {
+      if (!toPlainText(text) && attachments.length === 0) return false;
+      setBusy(parentId ?? "root");
+      const res = await fetch(`/api/tasks/${taskId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          parentId: parentId ?? "",
+          attachments,
+          mentions: mentions ?? [],
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setBusy(null);
+      if (!res.ok) {
+        toast.error(data.error ?? "Could not post comment");
+        return false;
+      }
+      if (parentId) setReplyTo(null);
+      router.refresh();
+      return true;
+    },
+    [taskId, router]
+  );
 
   const roots = childrenOf.get(null) ?? [];
-  const ctx = {
-    replyTo,
-    setReplyTo,
-    replyText,
-    setReplyText,
-    replyAtts,
-    setReplyAtts,
-    replyMentions,
-    setReplyMentions,
-    busy,
-    post,
-    nameOf,
-    participants,
-    currentUser,
-    isCreator,
-  };
+  const currentUserId = currentUser?.id;
+
+  // Memoized context handed to every node — drafts live inside Composer, so this
+  // only changes when the open reply / busy state (or the stable participant
+  // data) changes, not on every keystroke.
+  const ctx = useMemo(
+    () => ({
+      replyTo,
+      setReplyTo,
+      busy,
+      post,
+      nameOf,
+      participants,
+      currentUserId,
+      isCreator,
+    }),
+    [replyTo, busy, post, nameOf, participants, currentUserId, isCreator]
+  );
 
   return (
     <div className="space-y-4">
@@ -337,18 +348,14 @@ export function CommentThread({
 
       <div className="border-t pt-3">
         <Composer
-          ctx={ctx}
-          value={rootText}
-          setValue={setRootText}
-          atts={rootAtts}
-          setAtts={setRootAtts}
-          mentions={rootMentions}
-          setMentions={setRootMentions}
+          onSubmit={(text, atts, mentions) => post(text, null, atts, mentions)}
+          busy={busy === "root"}
           placeholder="Write a comment…"
           minHeight="min-h-16"
-          submitting={busy === "root"}
           submitLabel="Comment"
-          onSubmit={() => post(rootText, null, rootAtts, rootMentions)}
+          participants={participants}
+          currentUserId={currentUserId}
+          isCreator={isCreator}
         />
       </div>
     </div>

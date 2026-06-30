@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { cache } from "react";
 import bcrypt from "bcryptjs";
 
 import { connectToDatabase, stripMongo } from "@/lib/db";
@@ -68,11 +69,19 @@ async function ensureSeeded() {
   seeded = true;
 }
 
+// Fetching every user is the hottest read in the app — a single page render can
+// ask for it several times (visible users, assignable users, meeting visibility).
+// `cache` memoizes it for the lifetime of one request so those collapse into a
+// single round-trip; it does NOT persist across requests, so there's no staleness.
+const listAllUsers = cache(async () => {
+  await ensureSeeded();
+  const docs = await User.find().lean();
+  return docs.map((d) => stripMongo(d ));
+});
+
 export const store = {
   async list() {
-    await ensureSeeded();
-    const docs = await User.find().lean();
-    return docs.map((d) => stripMongo(d ));
+    return listAllUsers();
   },
 
   // Includes the password hash (re-selected) — only for the login/authorize path.

@@ -79,3 +79,64 @@ self.addEventListener("fetch", (event) => {
     );
   }
 });
+
+// ── Web Push ────────────────────────────────────────────────────────────────
+// The server (src/lib/push.js) sends a JSON payload: { title, body, url, tag }.
+// We turn it into a native OS notification. On a PWA/TWA this shows up in the
+// phone's notification tray even when the app is closed.
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    // Fall back to a plain-text payload if it isn't JSON.
+    data = { body: event.data && event.data.text ? event.data.text() : "" };
+  }
+
+  const title = data.title || "SWM";
+  const options = {
+    body: data.body || "",
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    // Same tag → a newer notification replaces the older one instead of stacking.
+    tag: data.tag || "swm",
+    renotify: !!data.tag,
+    // Stash the deep-link so the click handler knows where to go.
+    data: { url: data.url || "/dashboard" },
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Tapping a notification focuses an existing app window (navigating it to the
+// target) or opens a new one if none is open.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || "/dashboard";
+  const targetUrl = new URL(target, self.location.origin).href;
+
+  event.waitUntil(
+    (async () => {
+      const clientList = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      for (const client of clientList) {
+        // Reuse any open app window — navigate it to the target and focus it.
+        if ("focus" in client) {
+          if ("navigate" in client) {
+            try {
+              await client.navigate(targetUrl);
+            } catch {
+              // Cross-origin or detached client — just focus it as-is.
+            }
+          }
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
+      }
+    })(),
+  );
+});
