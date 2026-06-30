@@ -60,8 +60,12 @@ data still renders. Every action appends to the task's `activity` audit log.
 Auth + roles, dashboards, team mgmt, profiles (photo upload), Tasks (multi-assignee
 lifecycle, subtasks, rich text, threaded replies, attachments, audit log),
 Analytics (/reports), Files/voice (Cloudinary), Email (Gmail SMTP via nodemailer),
-Meetings (messages + decisions/action points), Calendar (tasks + meetings + my
-subtasks), Settings (profile + password).
+Web Push (VAPID via `web-push`; `src/lib/push.js` mirrors `email.js` and fires on
+the same task/subtask/meeting events — opt-in per device under Settings →
+Notifications; subscriptions in `models/PushSubscription.js`; SW `push`/
+`notificationclick` handlers in `public/sw.js`), Meetings (messages +
+decisions/action points), Calendar (tasks + meetings + my subtasks), Settings
+(profile + password + notifications).
 
 ## Roadmap (still ComingSoon)
 Events, Approvals, recurring/reminders, task evaluation (Timeliness/Quality/Accuracy),

@@ -7,6 +7,7 @@ import { connectToDatabase, stripMongo } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { cleanHtml } from "@/lib/sanitize";
 import { emailTaskAssigned, emailTaskCompleted, emailSubtaskAssigned } from "@/lib/email";
+import { pushTaskAssigned, pushTaskCompleted, pushSubtaskAssigned } from "@/lib/push";
 import { canManage, isOwner } from "@/lib/rbac";
 import { store } from "@/lib/store";
 import { listAssignableTaskUsers } from "@/lib/users";
@@ -573,15 +574,21 @@ export async function createTask(
   if (recipients.length) {
     after(() =>
       Promise.allSettled(
-        recipients.map((r) =>
+        recipients.flatMap((r) => [
           emailTaskAssigned({
             to: r.user.email,
             assigneeName: r.name,
             taskTitle: task.title,
             assignerName: actor.name,
             taskId: task.id,
-          })
-        )
+          }),
+          pushTaskAssigned({
+            userId: r.user.id,
+            taskTitle: task.title,
+            assignerName: actor.name,
+            taskId: task.id,
+          }),
+        ])
       )
     );
   }
@@ -632,7 +639,7 @@ export async function updateTask(
       const cur = existing.get(cid);
       if (cur) return cur;
       const u = allowed.get(cid);
-      if (u.id !== actor.id) addedEmails.push({ to: u.email, name: u.name });
+      if (u.id !== actor.id) addedEmails.push({ id: u.id, to: u.email, name: u.name });
       return newAssignee({ id: u.id, name: u.name, role: u.role });
     });
     task.activity.push(
@@ -649,15 +656,21 @@ export async function updateTask(
   if (addedEmails.length) {
     after(() =>
       Promise.allSettled(
-        addedEmails.map((r) =>
+        addedEmails.flatMap((r) => [
           emailTaskAssigned({
             to: r.to,
             assigneeName: r.name,
             taskTitle: task.title,
             assignerName: actor.name,
             taskId: task.id,
-          })
-        )
+          }),
+          pushTaskAssigned({
+            userId: r.id,
+            taskTitle: task.title,
+            assignerName: actor.name,
+            taskId: task.id,
+          }),
+        ])
       )
     );
   }
@@ -818,15 +831,25 @@ export async function addSubtask(
   // Notify the assignee (best-effort, after the response — never blocks the save).
   if (assigneeUser && assigneeUser.id !== actor.id) {
     after(() =>
-      emailSubtaskAssigned({
-        to: assigneeUser.email,
-        assigneeName: assigneeUser.name,
-        subtaskTitle: sub.title,
-        taskTitle: task.title,
-        assignerName: actor.name,
-        taskId: task.id,
-        subtaskKey: sub.key,
-      })
+      Promise.allSettled([
+        emailSubtaskAssigned({
+          to: assigneeUser.email,
+          assigneeName: assigneeUser.name,
+          subtaskTitle: sub.title,
+          taskTitle: task.title,
+          assignerName: actor.name,
+          taskId: task.id,
+          subtaskKey: sub.key,
+        }),
+        pushSubtaskAssigned({
+          userId: assigneeUser.id,
+          subtaskTitle: sub.title,
+          taskTitle: task.title,
+          assignerName: actor.name,
+          taskId: task.id,
+          subtaskKey: sub.key,
+        }),
+      ])
     );
   }
 
@@ -904,15 +927,25 @@ export async function updateSubtask(
   // Notify the newly assigned person (best-effort, after the response is sent).
   if (notifyUser) {
     after(() =>
-      emailSubtaskAssigned({
-        to: notifyUser.email,
-        assigneeName: notifyUser.name,
-        subtaskTitle: sub.title,
-        taskTitle: task.title,
-        assignerName: actor.name,
-        taskId: task.id,
-        subtaskKey: sub.key,
-      })
+      Promise.allSettled([
+        emailSubtaskAssigned({
+          to: notifyUser.email,
+          assigneeName: notifyUser.name,
+          subtaskTitle: sub.title,
+          taskTitle: task.title,
+          assignerName: actor.name,
+          taskId: task.id,
+          subtaskKey: sub.key,
+        }),
+        pushSubtaskAssigned({
+          userId: notifyUser.id,
+          subtaskTitle: sub.title,
+          taskTitle: task.title,
+          assignerName: actor.name,
+          taskId: task.id,
+          subtaskKey: sub.key,
+        }),
+      ])
     );
   }
 
@@ -1033,13 +1066,21 @@ export async function transitionTask(
       try {
         const creator = await store.findById(task.assignerId);
         if (creator && creator.id !== actor.id) {
-          await emailTaskCompleted({
-            to: creator.email,
-            creatorName: creator.name,
-            taskTitle: task.title,
-            byName: actor.name,
-            taskId: task.id,
-          });
+          await Promise.allSettled([
+            emailTaskCompleted({
+              to: creator.email,
+              creatorName: creator.name,
+              taskTitle: task.title,
+              byName: actor.name,
+              taskId: task.id,
+            }),
+            pushTaskCompleted({
+              userId: creator.id,
+              taskTitle: task.title,
+              byName: actor.name,
+              taskId: task.id,
+            }),
+          ]);
         }
       } catch (err) {
         console.error("Task notification failed:", err);

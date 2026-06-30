@@ -7,6 +7,7 @@ import { connectToDatabase, stripMongo } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { cleanHtml } from "@/lib/sanitize";
 import { emailMeetingInvite } from "@/lib/email";
+import { pushMeetingInvite } from "@/lib/push";
 import { canManage, isOwner } from "@/lib/rbac";
 import { listVisibleUsers } from "@/lib/users";
 import { destroyAsset } from "@/lib/cloudinary";
@@ -328,7 +329,7 @@ export async function createMeeting(
   if (invites.length) {
     after(() =>
       Promise.allSettled(
-        invites.map((r) =>
+        invites.flatMap((r) => [
           emailMeetingInvite({
             to: r.user.email,
             attendeeName: r.name,
@@ -336,8 +337,15 @@ export async function createMeeting(
             byName: actor.name,
             meetingId: meeting.id,
             when: whenStr,
-          })
-        )
+          }),
+          pushMeetingInvite({
+            userId: r.user.id,
+            title: meeting.title,
+            byName: actor.name,
+            meetingId: meeting.id,
+            when: whenStr,
+          }),
+        ])
       )
     );
   }
@@ -377,7 +385,7 @@ export async function updateMeeting(
       const cur = existing.get(cid);
       if (cur) return cur;
       const u = allowed.get(cid);
-      newlyInvited.push({ to: u.email, name: u.name });
+      newlyInvited.push({ id: u.id, to: u.email, name: u.name });
       return { id: u.id, name: u.name, role: u.role, status: "invited", joinedAt: null };
     });
   }
@@ -391,7 +399,7 @@ export async function updateMeeting(
   if (newlyInvited.length) {
     after(() =>
       Promise.allSettled(
-        newlyInvited.map((r) =>
+        newlyInvited.flatMap((r) => [
           emailMeetingInvite({
             to: r.to,
             attendeeName: r.name,
@@ -399,8 +407,15 @@ export async function updateMeeting(
             byName: actor.name,
             meetingId: m.id,
             when: whenStr,
-          })
-        )
+          }),
+          pushMeetingInvite({
+            userId: r.id,
+            title: m.title,
+            byName: actor.name,
+            meetingId: m.id,
+            when: whenStr,
+          }),
+        ])
       )
     );
   }
