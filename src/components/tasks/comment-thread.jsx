@@ -3,15 +3,18 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Reply, Send, Paperclip, X } from "lucide-react";
+import { Loader2, Reply, Send, Paperclip, X, Lock } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { RichText, RichTextEditor } from "@/components/rich-text";
 import { AttachmentList, AttachmentUploader } from "@/components/attachments";
+import { MentionPicker } from "@/components/tasks/mention-picker";
 import { cn, formatDateTime, getInitials, toPlainText } from "@/lib/utils";
 
 const MAX_INDENT = 4;
+// A comment that mentions someone must be a real message (matches the server).
+const MENTION_MIN_CHARS = 50;
 
 function PendingAtts({ items, onRemove }) {
   if (items.length === 0) return null;
@@ -37,6 +40,61 @@ function PendingAtts({ items, onRemove }) {
   );
 }
 
+// A reusable composer: rich-text + attachments + an @mention picker. The mention
+// picker is only offered to people who can post private mentions (the creator);
+// for everyone else mentions just notify, so we keep the box simpler.
+function Composer({ ctx, value, setValue, atts, setAtts, mentions, setMentions, placeholder, minHeight, submitting, onSubmit, submitLabel }) {
+  const { participants, currentUser, isCreator } = ctx;
+  const tooShort =
+    mentions.length > 0 && toPlainText(value).length < MENTION_MIN_CHARS;
+  const empty = !toPlainText(value) && atts.length === 0;
+
+  return (
+    <div className="space-y-2">
+      <RichTextEditor
+        value={value}
+        onChange={setValue}
+        placeholder={placeholder}
+        minHeight={minHeight}
+      />
+      <PendingAtts
+        items={atts}
+        onRemove={(i) => setAtts((a) => a.filter((_, idx) => idx !== i))}
+      />
+      {isCreator && participants.length > 1 && (
+        <MentionPicker
+          participants={participants}
+          value={mentions}
+          onChange={setMentions}
+          excludeId={currentUser?.id}
+        />
+      )}
+      {mentions.length > 0 && (
+        <p className="inline-flex items-center gap-1 text-xs text-violet-600 dark:text-violet-400">
+          <Lock className="size-3" />
+          Private — only you, the people you mention and managers can see this
+          {tooShort ? ` · at least ${MENTION_MIN_CHARS} characters` : ""}
+        </p>
+      )}
+      <div className="flex items-center justify-between gap-2">
+        <AttachmentUploader onAdd={(a) => setAtts((prev) => [...prev, a])} />
+        <Button
+          size="sm"
+          disabled={submitting || empty || tooShort}
+          onClick={onSubmit}
+        >
+          {submitting ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Send className="size-4" />
+          )}
+          {submitLabel}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // Module-level (stable) component so it isn't recreated on every keystroke,
 // which would remount the reply editor and drop focus after one character.
 function CommentNode({ comment, depth, childrenOf, ctx }) {
@@ -47,11 +105,19 @@ function CommentNode({ comment, depth, childrenOf, ctx }) {
     setReplyText,
     replyAtts,
     setReplyAtts,
+    replyMentions,
+    setReplyMentions,
     busy,
     post,
+    nameOf,
   } = ctx;
   const replies = childrenOf.get(comment.id) ?? [];
   const isFeedback = comment.kind === "feedback";
+  const isSubmission = comment.kind === "submission";
+  const isPrivate = comment.visibility === "private";
+  const mentionNames = (comment.mentions ?? [])
+    .map((id) => nameOf.get(id))
+    .filter(Boolean);
   const open = replyTo === comment.id;
 
   return (
@@ -66,7 +132,8 @@ function CommentNode({ comment, depth, childrenOf, ctx }) {
           <div
             className={cn(
               "rounded-lg border p-2.5",
-              isFeedback && "border-amber-500/30 bg-amber-500/5"
+              isFeedback && "border-amber-500/30 bg-amber-500/5",
+              (isSubmission || isPrivate) && "border-violet-500/30 bg-violet-500/5"
             )}
           >
             <div className="flex items-center justify-between gap-2">
@@ -77,11 +144,27 @@ function CommentNode({ comment, depth, childrenOf, ctx }) {
                     feedback
                   </span>
                 )}
+                {isSubmission && (
+                  <span className="ml-2 text-xs font-normal text-violet-600 dark:text-violet-400">
+                    submission
+                  </span>
+                )}
+                {isPrivate && (
+                  <span className="ml-2 inline-flex items-center gap-1 text-xs font-normal text-violet-600 dark:text-violet-400">
+                    <Lock className="size-3" />
+                    private
+                  </span>
+                )}
               </span>
               <span className="text-xs text-muted-foreground">
                 {formatDateTime(comment.createdAt)}
               </span>
             </div>
+            {mentionNames.length > 0 && (
+              <p className="mt-1 text-xs text-violet-600 dark:text-violet-400">
+                {mentionNames.map((n) => `@${n}`).join(" ")}
+              </p>
+            )}
             <RichText html={comment.text} className="mt-1 text-muted-foreground" />
             {comment.attachments?.length > 0 && (
               <div className="mt-2">
@@ -100,52 +183,33 @@ function CommentNode({ comment, depth, childrenOf, ctx }) {
           </button>
 
           {open && (
-            <div className="mt-2 space-y-2">
-              <RichTextEditor
+            <div className="mt-2">
+              <Composer
+                ctx={ctx}
                 value={replyText}
-                onChange={setReplyText}
+                setValue={setReplyText}
+                atts={replyAtts}
+                setAtts={setReplyAtts}
+                mentions={replyMentions}
+                setMentions={setReplyMentions}
                 placeholder={`Reply to ${comment.authorName}…`}
                 minHeight="min-h-14"
+                submitting={busy === comment.id}
+                submitLabel="Reply"
+                onSubmit={() => post(replyText, comment.id, replyAtts, replyMentions)}
               />
-              <PendingAtts
-                items={replyAtts}
-                onRemove={(i) =>
-                  setReplyAtts((a) => a.filter((_, idx) => idx !== i))
-                }
-              />
-              <div className="flex items-center justify-between gap-2">
-                <AttachmentUploader
-                  onAdd={(a) => setReplyAtts((prev) => [...prev, a])}
-                />
-                <div className="flex gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setReplyTo(null);
-                      setReplyText("");
-                      setReplyAtts([]);
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    size="sm"
-                    disabled={
-                      busy === comment.id ||
-                      (!toPlainText(replyText) && replyAtts.length === 0)
-                    }
-                    onClick={() => post(replyText, comment.id, replyAtts)}
-                  >
-                    {busy === comment.id ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <Send className="size-4" />
-                    )}
-                    Reply
-                  </Button>
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setReplyTo(null);
+                  setReplyText("");
+                  setReplyAtts([]);
+                  setReplyMentions([]);
+                }}
+                className="mt-1 text-xs text-muted-foreground hover:text-foreground"
+              >
+                Cancel
+              </button>
             </div>
           )}
 
@@ -168,14 +232,27 @@ function CommentNode({ comment, depth, childrenOf, ctx }) {
   );
 }
 
-export function CommentThread({ taskId, comments }) {
+export function CommentThread({
+  taskId,
+  comments,
+  participants = [],
+  currentUser,
+  isCreator = false,
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(null);
   const [rootText, setRootText] = useState("");
   const [rootAtts, setRootAtts] = useState([]);
+  const [rootMentions, setRootMentions] = useState([]);
   const [replyTo, setReplyTo] = useState(null);
   const [replyText, setReplyText] = useState("");
   const [replyAtts, setReplyAtts] = useState([]);
+  const [replyMentions, setReplyMentions] = useState([]);
+
+  const nameOf = useMemo(
+    () => new Map(participants.map((p) => [p.id, p.name])),
+    [participants]
+  );
 
   const childrenOf = useMemo(() => {
     const map = new Map();
@@ -190,13 +267,18 @@ export function CommentThread({ taskId, comments }) {
     return map;
   }, [comments]);
 
-  async function post(text, parentId, attachments) {
+  async function post(text, parentId, attachments, mentions) {
     if (!toPlainText(text) && attachments.length === 0) return;
     setBusy(parentId ?? "root");
     const res = await fetch(`/api/tasks/${taskId}/comments`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, parentId: parentId ?? "", attachments }),
+      body: JSON.stringify({
+        text,
+        parentId: parentId ?? "",
+        attachments,
+        mentions: mentions ?? [],
+      }),
     });
     const data = await res.json().catch(() => ({}));
     setBusy(null);
@@ -208,9 +290,11 @@ export function CommentThread({ taskId, comments }) {
       setReplyTo(null);
       setReplyText("");
       setReplyAtts([]);
+      setReplyMentions([]);
     } else {
       setRootText("");
       setRootAtts([]);
+      setRootMentions([]);
     }
     router.refresh();
   }
@@ -223,8 +307,14 @@ export function CommentThread({ taskId, comments }) {
     setReplyText,
     replyAtts,
     setReplyAtts,
+    replyMentions,
+    setReplyMentions,
     busy,
     post,
+    nameOf,
+    participants,
+    currentUser,
+    isCreator,
   };
 
   return (
@@ -245,31 +335,21 @@ export function CommentThread({ taskId, comments }) {
         </div>
       )}
 
-      <div className="space-y-2 border-t pt-3">
-        <RichTextEditor
+      <div className="border-t pt-3">
+        <Composer
+          ctx={ctx}
           value={rootText}
-          onChange={setRootText}
+          setValue={setRootText}
+          atts={rootAtts}
+          setAtts={setRootAtts}
+          mentions={rootMentions}
+          setMentions={setRootMentions}
           placeholder="Write a comment…"
           minHeight="min-h-16"
+          submitting={busy === "root"}
+          submitLabel="Comment"
+          onSubmit={() => post(rootText, null, rootAtts, rootMentions)}
         />
-        <PendingAtts
-          items={rootAtts}
-          onRemove={(i) => setRootAtts((a) => a.filter((_, idx) => idx !== i))}
-        />
-        <div className="flex items-center justify-between gap-2">
-          <AttachmentUploader onAdd={(a) => setRootAtts((prev) => [...prev, a])} />
-          <Button
-            onClick={() => post(rootText, null, rootAtts)}
-            disabled={busy === "root" || (!toPlainText(rootText) && rootAtts.length === 0)}
-          >
-            {busy === "root" ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Send className="size-4" />
-            )}
-            Comment
-          </Button>
-        </div>
       </div>
     </div>
   );

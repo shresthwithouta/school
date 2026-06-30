@@ -27,6 +27,11 @@ import { createMeetingSchema } from "@/lib/validation";
 
 const fieldsSchema = createMeetingSchema.omit({ attendeeIds: true });
 
+// A starter agenda so a new meeting opens with structure already written in,
+// rather than a blank box. Organizers can edit or clear it.
+const DEFAULT_AGENDA =
+  "<p><strong>Agenda</strong></p><ul><li>Welcome &amp; objectives</li><li>Discussion points</li><li>Decisions &amp; action items</li><li>Next steps</li></ul>";
+
 
 
 
@@ -63,7 +68,8 @@ export function MeetingDialog({
     resolver: zodResolver(fieldsSchema),
     defaultValues: {
       title: meeting?.title ?? "",
-      description: meeting?.description ?? "",
+      description: meeting?.description ?? (mode === "create" ? DEFAULT_AGENDA : ""),
+      link: meeting?.link ?? "",
       scheduledAt: meeting?.scheduledAt ?? "",
       maxAttendees: meeting?.maxAttendees ?? 0,
     },
@@ -124,6 +130,23 @@ export function MeetingDialog({
                 onChange={(html) => setValue("description", html, { shouldDirty: true })}
                 placeholder="What's this meeting about?"
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="link">Meeting link</Label>
+              <Input
+                id="link"
+                type="url"
+                placeholder="https://meet.google.com/… or Zoom/Teams link"
+                {...register("link")}
+                aria-invalid={!!errors.link}
+              />
+              {errors.link && (
+                <p className="text-sm text-destructive">{errors.link.message}</p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Optional. Shared on the meeting page and emailed to attendees.
+              </p>
             </div>
 
             <div className="space-y-2">

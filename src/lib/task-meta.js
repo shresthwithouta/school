@@ -8,13 +8,19 @@ export const TASK_STATUSES = [
   "draft",
   "assigned",
   "in_progress",
+  "in_review",
   "delayed",
   "completed",
   "cancelled",
 ] ;
 
 /** Statuses a single assignee can hold. */
-export const ASSIGNEE_STATUSES = ["assigned", "in_progress", "completed"] ;
+export const ASSIGNEE_STATUSES = [
+  "assigned",
+  "in_progress",
+  "submitted",
+  "completed",
+] ;
 
 export const STATUS_META
 
@@ -37,6 +43,12 @@ export const STATUS_META
     badgeClass:
       "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
   },
+  in_review: {
+    label: "In review",
+    description: "Submitted for review, awaiting approval.",
+    badgeClass:
+      "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400",
+  },
   delayed: {
     label: "Delayed",
     description: "Past its due date and not yet completed.",
@@ -55,16 +67,18 @@ export const STATUS_META
     badgeClass:
       "border-border bg-muted text-muted-foreground line-through",
   },
-  // ── Legacy assignee statuses kept so old data still renders ──
+  // Per-assignee: submitted their part for review, awaiting approval.
+  submitted: {
+    label: "Submitted",
+    description: "Submitted for review, awaiting approval.",
+    badgeClass:
+      "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400",
+  },
+  // ── Legacy assignee status kept so old data still renders ──
   accepted: {
     label: "Accepted",
     badgeClass:
       "border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-400",
-  },
-  submitted: {
-    label: "Submitted",
-    badgeClass:
-      "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400",
   },
 };
 
@@ -100,7 +114,10 @@ export const PRIORITY_META
 };
 
 // ── Subtasks (one level deep) ──────────────────────────────────────
-export const SUBTASK_STATUSES = ["todo", "in_progress", "done"] ;
+// Like tasks, a subtask is submitted for review before it can be closed: the
+// assignee moves it todo → in_progress → submitted, and only the subtask's
+// creator approves it (→ done) or sends it back (→ in_progress).
+export const SUBTASK_STATUSES = ["todo", "in_progress", "submitted", "done"] ;
  
 
 export const SUBTASK_STATUS_META
@@ -116,6 +133,11 @@ export const SUBTASK_STATUS_META
     badgeClass:
       "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
   },
+  submitted: {
+    label: "In review",
+    badgeClass:
+      "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400",
+  },
   done: {
     label: "Done",
     badgeClass:
@@ -128,19 +150,26 @@ export const SUBTASK_STATUS_META
 
 export const ACTION_META = {
   start: { label: "Start work" },
-  complete: { label: "Mark complete" },
+  submit: { label: "Submit for review" },
+  approve: { label: "Approve" },
+  sendback: { label: "Send back" },
   cancel: { label: "Cancel task" },
   reopen: { label: "Reopen" },
 };
 
-/** Actions available to an assignee based on their own per-person status. */
+/**
+ * Actions an assignee can take on their OWN per-person status. Assignees can no
+ * longer close their own work — they submit it for review and the task creator
+ * (or a manager) approves it. Approve / send back are reviewer actions and are
+ * gated separately (see canReviewTask in lib/task-access.js).
+ */
 export function assigneeActions(status) {
   switch (status) {
     case "assigned":
-      return ["start", "complete"];
+      return ["start", "submit"];
     case "accepted": // legacy
     case "in_progress":
-      return ["complete"];
+      return ["submit"];
     default:
       return [];
   }

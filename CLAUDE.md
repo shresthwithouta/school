@@ -20,14 +20,38 @@ Source is plain JS (no TypeScript); path alias `@/*` via `jsconfig.json`.
   `auth.config`, which has no DB).
 
 ## Tasks lifecycle
-Per-assignee status is `assigned → in_progress → completed` (actions: `start`,
-`complete`). Task-level status is **derived** (never stored) in `deriveTaskStatus`:
-`draft` (no assignees) · `assigned` · `in_progress` · `delayed` (open & past due) ·
-`completed` (all assignees done AND no open subtasks) · `cancelled`. `cancel`/`reopen`
-are open to anyone involved (creator, assignee, or a manager). Only the creator can
-edit/delete the task. There is **no** accept/submit/reject or evaluation step — the
-`accepted`/`submitted` entries in `task-meta.js` are legacy badge styles kept so old
-data still renders. Every action appends to the task's `activity` audit log.
+Per-assignee status is `assigned → in_progress → submitted → completed`. Assignees
+**cannot close their own work** — they `start` it then `submit` it for review (a
+required note + optional **private** files); that emails the assigner. A task can
+only be submitted once **all its subtasks are closed**. The reviewer (task
+creator OR a manager) then `approve`s it (→ `completed`) or `sendback`s it
+(→ `in_progress`, optional reason emailed to the assignee). **Subtasks** carry the
+same flow: `todo → in_progress → submitted → done`; the assignee submits, and only
+the subtask's **creator** (or the task creator / a manager) approves/sends back.
+Task-level status is **derived** (never stored) in `deriveTaskStatus`: `draft` (no
+assignees) · `assigned` · `in_progress` · `in_review` (someone submitted, awaiting
+approval) · `delayed` (open & past due) · `completed` (all assignees approved AND
+no open subtasks) · `cancelled`. `cancel`/`reopen` are open to anyone involved.
+Only the creator can edit/delete the task. Every action appends to the `activity`
+audit log.
+
+**Visibility of task content lives in one file — `src/lib/task-access.js`** (pure,
+client-safe). Submission **files** are the most restricted content: only the
+uploader, the task creator (assigner) and the **Chairman/Director** (Owner) see a
+file — other managers don't (`canSeeAttachment` → `isOwner`). Comment **text**
+stays public. When the **creator** @mentions someone in a comment it becomes
+**private** (creator + mentioned + management reviewers via `REVIEWER_ROLES`),
+must be ≥ 50 chars, and emails them. `lib/tasks.js` runs every task it returns
+through `viewTask(actor, task)` to strip content the viewer may not see.
+Bulk-assign by role and a single group-CC assignment email are also supported.
+
+## File Repository (`/repository`, Chairman-only management)
+`src/lib/repository.js` + `models/RepoFile.js`. The **Chairman** (Owner) can
+**Save** a submitted file from a task (the Cloudinary asset is **copied** via
+`copyAsset` so it's independent of the source), **Share** it with specific people
+(`sharedWith`), and **multi-select delete** it permanently (removes the record +
+destroys the Cloudinary asset, behind a confirm). Everyone else sees only files
+shared with them. Saving/sharing/deleting are all Owner-gated server-side.
 
 ## Auth & access model
 - **No public sign-up.** Owner/Admin create all accounts in-app. Demo logins:
@@ -58,11 +82,15 @@ data still renders. Every action appends to the task's `activity` audit log.
 
 ## Built
 Auth + roles, dashboards, team mgmt, profiles (photo upload), Tasks (multi-assignee
-lifecycle, subtasks, rich text, threaded replies, attachments, audit log),
-Analytics (/reports), Files/voice (Cloudinary), Email (Gmail SMTP via nodemailer),
-Meetings (messages + decisions/action points), Calendar (tasks + meetings + my
-subtasks), Settings (profile + password).
+lifecycle with **submit-for-review → approve/send-back**, bulk-assign by role,
+subtasks, rich text, threaded replies, **private submission files**, **private
+@mention comments**, audit log), Analytics (/reports), Files/voice (Cloudinary),
+Email (Gmail SMTP via nodemailer — HTML; group-CC assignment + meeting invites +
+review notices), Meetings (group-CC invite with join **link** + agenda, messages,
+decisions/action points any participant can add/close — tracks **who closed** —
+open ones surface on the dashboard), Calendar (tasks + meetings + my subtasks),
+Settings (profile + password).
 
 ## Roadmap (still ComingSoon)
-Events, Approvals, recurring/reminders, task evaluation (Timeliness/Quality/Accuracy),
+Events, recurring/reminders, task evaluation scoring (Timeliness/Quality/Accuracy),
 forced password change on first login, login rate-limiting, and the AI features.

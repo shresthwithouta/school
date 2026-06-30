@@ -17,7 +17,8 @@ export async function POST(
       id,
       input.text ?? "",
       input.parentId || null,
-      input.attachments
+      input.attachments,
+      input.mentions
     );
     return NextResponse.json({ task });
   } catch (err) {

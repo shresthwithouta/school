@@ -19,6 +19,7 @@ import {
   Square,
   Plus,
   X,
+  Video,
 } from "lucide-react";
 
 import {
@@ -190,6 +191,14 @@ export function MeetingPageClient({
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
+          {meeting.link && (
+            <Button asChild variant="outline" size="sm">
+              <a href={meeting.link} target="_blank" rel="noopener noreferrer">
+                <Video className="size-4" />
+                Join link
+              </a>
+            </Button>
+          )}
           {canJoin && (
             <Button onClick={() => api(`/api/meetings/${meeting.id}/join`, "POST", undefined, "join")} disabled={!!busy}>
               {busy === "join" ? <Loader2 className="size-4 animate-spin" /> : <LogIn className="size-4" />}
@@ -250,7 +259,19 @@ export function MeetingPageClient({
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
-          {/* Final discussion decisions / action points */}
+          {/* Agenda — shown first so the meeting's purpose is up top */}
+          {meeting.description && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Agenda</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <RichText html={meeting.description} className="text-muted-foreground" />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Decisions / action points */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -344,6 +365,17 @@ export function MeetingPageClient({
                               {formatDateTime(d.dueDate).split(",")[0]}
                             </span>
                           )}
+                          {/* Who closed it (or who raised it, while still open). */}
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {d.done && d.doneByName ? (
+                              <span className="text-emerald-600 dark:text-emerald-400">
+                                Closed by {d.doneByName}
+                                {d.doneAt ? ` · ${formatDateTime(d.doneAt).split(",")[0]}` : ""}
+                              </span>
+                            ) : (
+                              d.createdByName && <>Added by {d.createdByName}</>
+                            )}
+                          </p>
                         </div>
                         {(d.createdById === currentUser.id || organizer) && (
                           <button
@@ -363,15 +395,6 @@ export function MeetingPageClient({
               )}
             </CardContent>
           </Card>
-
-          {meeting.description && (
-            <Card>
-              <CardHeader><CardTitle className="text-base">Agenda</CardTitle></CardHeader>
-              <CardContent>
-                <RichText html={meeting.description} className="text-muted-foreground" />
-              </CardContent>
-            </Card>
-          )}
 
           {completed && meeting.summary && (
             <Card>

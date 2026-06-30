@@ -5,8 +5,21 @@ import { after } from "next/server";
 import { connectToDatabase, stripMongo } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { cleanHtml } from "@/lib/sanitize";
-import { emailTaskAssigned, emailTaskCompleted, emailSubtaskAssigned } from "@/lib/email";
+import {
+  emailTaskAssigned,
+  emailTaskAssignedGroup,
+  emailTaskCompleted,
+  emailTaskSubmitted,
+  emailSubmissionReturned,
+  emailMention,
+  emailSubtaskAssigned,
+} from "@/lib/email";
 import { canManage, isOwner } from "@/lib/rbac";
+import {
+  canReviewTask,
+  canSeeAttachment,
+  canSeeComment,
+} from "@/lib/task-access";
 import { store } from "@/lib/store";
 import { listAssignableTaskUsers } from "@/lib/users";
 import { destroyAsset } from "@/lib/cloudinary";
@@ -228,6 +241,8 @@ function deriveTaskStatus(t) {
   const subtasksOpen = (t.subtasks || []).some((s) => s.status !== "done");
   if (allAssigneesDone && !subtasksOpen) return "completed";
   if (t.dueDate && new Date(t.dueDate).getTime() < Date.now()) return "delayed";
+  // Someone has submitted their part and it's waiting on a reviewer to approve.
+  if (a.some((x) => x.status === "submitted")) return "in_review";
   if (allAssigneesDone || a.some((x) => x.status === "in_progress")) {
     return "in_progress";
   }
@@ -260,6 +275,37 @@ function toDTO(t) {
     overdue: delayed, // alias kept for older callers
     daysLate,
   };
+}
+
+// Actor-aware serialization. toDTO derives the public shape; viewTask then hides
+// what this viewer isn't allowed to see: private submission files (only the
+// uploader, the task creator and management reviewers) and private comments
+// (e.g. an @mention by the creator). Comment TEXT stays public — only files
+// inside a comment are filtered. Every endpoint that returns a task to a client
+// goes through this so the data never leaks past the UI. See lib/task-access.js.
+function viewTask(actor, t) {
+  const dto = toDTO(t);
+  dto.attachments = (dto.attachments || []).filter((a) =>
+    canSeeAttachment(actor, t, a)
+  );
+  dto.comments = (dto.comments || [])
+    .filter((c) => canSeeComment(actor, t, c))
+    .map((c) =>
+      (c.attachments || []).every((a) => canSeeAttachment(actor, t, a))
+        ? c
+        : { ...c, attachments: c.attachments.filter((a) => canSeeAttachment(actor, t, a)) }
+    );
+  return dto;
+}
+
+/** Plain-text length of sanitized HTML — used to enforce comment minimums. */
+function plainTextLength(html) {
+  return String(html || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&[a-z]+;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim().length;
 }
 
 function buildAttachment(actor, input) {
@@ -363,7 +409,7 @@ export async function listVisibleTasks(actor) {
     })
     .filter((t) => canSeeTask(actor, t))
     .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
-    .map(toDTO);
+    .map((t) => viewTask(actor, t));
 }
 
 export async function getTaskForActor(
@@ -373,7 +419,7 @@ export async function getTaskForActor(
   const task = await rawById(id);
   if (!task) return null;
   if (!canSeeTask(actor, task)) return null;
-  return toDTO(task);
+  return viewTask(actor, task);
 }
 
  
@@ -513,6 +559,32 @@ export async function getTaskAnalytics(actor) {
 }
 
 // ── Mutations ──────────────────────────────────────────────────────
+// Assignment notifications. One person → a personalized email. Multiple people
+// at once → a single email addressed to the assigner with everyone in CC, so the
+// whole group can see who else is on the task (instead of N isolated emails).
+// `recipients` is [{ email, name }] and excludes the assigner. Best-effort.
+function sendAssignmentEmails(actor, task, recipients) {
+  const valid = recipients.filter((r) => r.email);
+  if (valid.length === 0) return Promise.resolve();
+  if (valid.length === 1) {
+    return emailTaskAssigned({
+      to: valid[0].email,
+      assigneeName: valid[0].name,
+      taskTitle: task.title,
+      assignerName: actor.name,
+      taskId: task.id,
+    });
+  }
+  return emailTaskAssignedGroup({
+    to: actor.email,
+    cc: valid.map((r) => r.email),
+    assigneeNames: valid.map((r) => r.name).join(", "),
+    taskTitle: task.title,
+    assignerName: actor.name,
+    taskId: task.id,
+  });
+}
+
 export async function createTask(
   actor,
   input
@@ -564,25 +636,13 @@ export async function createTask(
   // Notify assignees (best-effort, after the response is sent — never blocks the save).
   const recipients = assignees
     .filter((a) => a.id !== actor.id)
-    .map((a) => ({ user: allowed.get(a.id), name: a.name }))
-    .filter((r) => r.user);
+    .map((a) => ({ email: allowed.get(a.id)?.email, name: a.name }))
+    .filter((r) => r.email);
   if (recipients.length) {
-    after(() =>
-      Promise.allSettled(
-        recipients.map((r) =>
-          emailTaskAssigned({
-            to: r.user.email,
-            assigneeName: r.name,
-            taskTitle: task.title,
-            assignerName: actor.name,
-            taskId: task.id,
-          })
-        )
-      )
-    );
+    after(() => sendAssignmentEmails(actor, task, recipients));
   }
 
-  return toDTO(task);
+  return viewTask(actor, task);
 }
 
 export async function updateTask(
@@ -628,7 +688,7 @@ export async function updateTask(
       const cur = existing.get(cid);
       if (cur) return cur;
       const u = allowed.get(cid);
-      if (u.id !== actor.id) addedEmails.push({ to: u.email, name: u.name });
+      if (u.id !== actor.id) addedEmails.push({ email: u.email, name: u.name });
       return newAssignee({ id: u.id, name: u.name, role: u.role });
     });
     task.activity.push(
@@ -643,22 +703,10 @@ export async function updateTask(
   await saveTask(task);
 
   if (addedEmails.length) {
-    after(() =>
-      Promise.allSettled(
-        addedEmails.map((r) =>
-          emailTaskAssigned({
-            to: r.to,
-            assigneeName: r.name,
-            taskTitle: task.title,
-            assignerName: actor.name,
-            taskId: task.id,
-          })
-        )
-      )
-    );
+    after(() => sendAssignmentEmails(actor, task, addedEmails));
   }
 
-  return toDTO(task);
+  return viewTask(actor, task);
 }
 
 export async function deleteTask(
@@ -691,7 +739,8 @@ export async function addComment(
   id,
   text,
   parentId,
-  attachments
+  attachments,
+  mentions
 ) {
   const task = await rawById(id);
   if (!task) throw new AppError("Task not found.", 404);
@@ -709,6 +758,25 @@ export async function addComment(
     throw new AppError("The comment you replied to no longer exists.", 400);
   }
 
+  // @mentions can only name people who are on the task (its creator or an
+  // assignee). When the task creator mentions someone the comment becomes
+  // private — visible only to the creator, the mentioned people and management
+  // reviewers (see canSeeComment) — and must be a real message (≥ 50 chars).
+  const participantIds = new Set([
+    task.assignerId,
+    ...task.assignees.map((a) => a.id),
+  ]);
+  const mentionIds = [...new Set(mentions ?? [])].filter((mid) =>
+    participantIds.has(mid)
+  );
+  if (mentionIds.length > 0 && plainTextLength(clean) < 50) {
+    throw new AppError(
+      "A comment that mentions someone must be at least 50 characters.",
+      400
+    );
+  }
+  const isPrivate = actor.id === task.assignerId && mentionIds.length > 0;
+
   task.comments.push({
     id: crypto.randomUUID(),
     authorId: actor.id,
@@ -717,11 +785,37 @@ export async function addComment(
     kind: "comment",
     parentId: parentId ?? null,
     attachments: atts,
+    mentions: mentionIds,
+    visibility: isPrivate ? "private" : "public",
+    audienceIds: isPrivate ? mentionIds : [],
     createdAt: now(),
   });
   task.updatedAt = now();
   await saveTask(task);
-  return toDTO(task);
+
+  // Notify mentioned people (best-effort, after the response is sent).
+  if (mentionIds.length > 0) {
+    after(async () => {
+      const recipients = await Promise.all(
+        mentionIds.map((mid) => store.findById(mid))
+      );
+      await Promise.allSettled(
+        recipients
+          .filter((u) => u && u.id !== actor.id && u.email)
+          .map((u) =>
+            emailMention({
+              to: u.email,
+              mentionedName: u.name,
+              byName: actor.name,
+              taskTitle: task.title,
+              taskId: task.id,
+            })
+          )
+      );
+    });
+  }
+
+  return viewTask(actor, task);
 }
 
 // ── Attachments ────────────────────────────────────────────────────
@@ -739,7 +833,7 @@ export async function addTaskAttachment(
   task.activity.push(activity(actor, `attached "${input.name}"`));
   task.updatedAt = now();
   await saveTask(task);
-  return toDTO(task);
+  return viewTask(actor, task);
 }
 
 export async function removeTaskAttachment(
@@ -762,7 +856,7 @@ export async function removeTaskAttachment(
   task.updatedAt = now();
   await saveTask(task);
   await destroyAsset(att.publicId, att.resourceType);
-  return toDTO(task);
+  return viewTask(actor, task);
 }
 
 // ── Subtasks (one level deep) ──────────────────────────────────────
@@ -799,10 +893,15 @@ export async function addSubtask(
     priority: input.priority ?? "medium",
     assigneeId,
     assigneeName,
+    // Who raised the subtask — only they (or the task creator / a manager) may
+    // approve it once it's submitted for review.
+    createdById: actor.id,
+    createdByName: actor.name,
     expectedDate: input.expectedDate
       ? new Date(input.expectedDate).toISOString()
       : null,
     status: "todo",
+    submittedAt: null,
     createdAt: now(),
     completedAt: null,
   };
@@ -826,7 +925,7 @@ export async function addSubtask(
     );
   }
 
-  return toDTO(task);
+  return viewTask(actor, task);
 }
 
 export async function updateSubtask(
@@ -845,17 +944,35 @@ export async function updateSubtask(
   // Set when the assignee is changed to someone new, so we can email them below.
   let notifyUser = null;
 
-  // Status can be changed by anyone involved in the task or the subtask's own
-  // assignee (who may not otherwise be on the task).
-  if (input.status !== undefined) {
-    if (!involved && !isSubAssignee) {
+  // Subtask review workflow (mirrors tasks): the assignee works it
+  // (todo → in_progress) and submits it (→ submitted); only the subtask's
+  // creator — or the task creator / a manager — approves it (→ done) or sends it
+  // back (→ in_progress). The assignee can't close their own subtask.
+  if (input.status !== undefined && input.status !== sub.status) {
+    const target = input.status;
+    const subCreatorId = sub.createdById || task.assignerId;
+    const subReviewer = actor.id === subCreatorId || canReviewTask(actor, task);
+    if (target === "done") {
+      if (!subReviewer) {
+        throw new AppError("Only the subtask's creator can approve and close it.", 403);
+      }
+    } else if (target === "submitted") {
+      if (!isSubAssignee && !subReviewer) {
+        throw new AppError("Only the assignee can submit this subtask for review.", 403);
+      }
+    } else if (!isSubAssignee && !subReviewer && !involved) {
       throw new AppError("You cannot update this subtask.", 403);
     }
-    sub.status = input.status;
-    sub.completedAt = input.status === "done" ? now() : null;
-    task.activity.push(
-      activity(actor, `marked subtask "${sub.title}" as ${input.status}`)
-    );
+    sub.status = target;
+    if (target === "submitted") sub.submittedAt = now();
+    sub.completedAt = target === "done" ? now() : null;
+    const verb =
+      target === "submitted"
+        ? `submitted subtask "${sub.title}" for review`
+        : target === "done"
+          ? `approved subtask "${sub.title}"`
+          : `marked subtask "${sub.title}" as ${target}`;
+    task.activity.push(activity(actor, verb));
   }
 
   // Title / assignee / expected date can be edited by anyone involved in the
@@ -912,7 +1029,7 @@ export async function updateSubtask(
     );
   }
 
-  return toDTO(task);
+  return viewTask(actor, task);
 }
 
 export async function deleteSubtask(
@@ -928,7 +1045,7 @@ export async function deleteSubtask(
   task.subtasks = task.subtasks.filter((s) => s.id !== subId);
   task.updatedAt = now();
   await saveTask(task);
-  return toDTO(task);
+  return viewTask(actor, task);
 }
 
 export async function transitionTask(
@@ -944,8 +1061,13 @@ export async function transitionTask(
 
   const mine = task.assignees.find((a) => a.id === actor.id);
   const wasCompleted = deriveTaskStatus(task) === "completed";
+  const reviewer = canReviewTask(actor, task);
 
-  const pushComment = (text, kind) => {
+  // Set after the switch so the relevant email fires once, after the response.
+  let notifySubmitTo = null; // assigner id — work was submitted for review
+  let notifyReturnTo = null; // { id, reason } — a submission was sent back
+
+  const pushComment = (text, kind, extra = {}) => {
     task.comments.push({
       id: crypto.randomUUID(),
       authorId: actor.id,
@@ -954,27 +1076,89 @@ export async function transitionTask(
       kind,
       parentId: null,
       attachments: [],
+      mentions: [],
+      visibility: "public",
+      audienceIds: [],
       createdAt: now(),
+      ...extra,
     });
   };
 
   switch (input.action) {
     case "start": {
-      if (!mine || mine.status === "completed") {
+      if (!mine || mine.status === "completed" || mine.status === "submitted") {
         throw new AppError("You cannot start this task right now.", 400);
       }
       mine.status = "in_progress";
       task.activity.push(activity(actor, "started work"));
       break;
     }
-    case "complete": {
-      if (!mine || mine.status === "completed") {
-        throw new AppError("You cannot complete this task right now.", 400);
+    // Assignees no longer close their own work — they submit it for review with
+    // a note (required) and optional private files; the assigner is notified.
+    case "submit": {
+      if (!mine || mine.status === "completed" || mine.status === "submitted") {
+        throw new AppError("You cannot submit this task right now.", 400);
       }
-      mine.status = "completed";
-      mine.completedAt = now();
-      if (input.note) pushComment(input.note, "note");
-      task.activity.push(activity(actor, "marked their part complete"));
+      // A task can only go up for review once all its subtasks are closed.
+      if ((task.subtasks || []).some((s) => s.status !== "done")) {
+        throw new AppError(
+          "Close all subtasks before submitting this task for review.",
+          400
+        );
+      }
+      const note = cleanHtml(input.note);
+      if (plainTextLength(note) === 0) {
+        throw new AppError("Add a short note describing what you're submitting.", 400);
+      }
+      const atts = (input.attachments ?? []).map((a) => buildAttachment(actor, a));
+      mine.status = "submitted";
+      mine.submittedAt = now();
+      // The submission (note + files) is private: only the submitter, the task
+      // creator and management reviewers can see it (see canSeeComment).
+      pushComment(input.note, "submission", {
+        attachments: atts,
+        visibility: "private",
+        audienceIds: [task.assignerId],
+      });
+      task.activity.push(activity(actor, "submitted their part for review"));
+      notifySubmitTo = task.assignerId;
+      break;
+    }
+    // Reviewer (task creator or a manager) approves a submitted part → completed.
+    case "approve": {
+      if (!reviewer) {
+        throw new AppError("Only the task creator or a manager can approve work.", 403);
+      }
+      const target = task.assignees.find((a) => a.id === input.assigneeId);
+      if (!target) throw new AppError("Choose whose submission to approve.", 400);
+      if (target.status !== "submitted") {
+        throw new AppError("That person hasn't submitted work to approve.", 400);
+      }
+      target.status = "completed";
+      target.completedAt = now();
+      if (input.note) pushComment(input.note, "feedback");
+      task.activity.push(activity(actor, `approved ${target.name}'s submission`));
+      break;
+    }
+    // Reviewer sends a submitted part back for changes → in_progress.
+    case "sendback": {
+      if (!reviewer) {
+        throw new AppError("Only the task creator or a manager can send work back.", 403);
+      }
+      const target = task.assignees.find((a) => a.id === input.assigneeId);
+      if (!target) throw new AppError("Choose whose submission to send back.", 400);
+      if (target.status !== "submitted") {
+        throw new AppError("That person hasn't submitted work to send back.", 400);
+      }
+      target.status = "in_progress";
+      target.completedAt = null;
+      if (input.note) pushComment(input.note, "feedback");
+      task.activity.push(
+        activity(actor, `sent ${target.name}'s submission back for changes`)
+      );
+      if (target.id !== actor.id) {
+        notifyReturnTo = { id: target.id, reason: input.note || "" };
+      }
       break;
     }
     case "cancel": {
@@ -1021,21 +1205,50 @@ export async function transitionTask(
   task.updatedAt = now();
   await saveTask(task);
 
-  // Notify the creator when the whole task becomes completed
-  // (best-effort, after the response is sent — never blocks the action).
+  // All notifications are best-effort and run after the response is sent so they
+  // never block the action: submitted-for-review (to the assigner), sent-back
+  // (to the assignee), and whole-task-completed (to the creator).
   const nowCompleted = deriveTaskStatus(task) === "completed";
-  if (!wasCompleted && nowCompleted) {
+  const completedNow = !wasCompleted && nowCompleted;
+  if (notifySubmitTo || notifyReturnTo || completedNow) {
     after(async () => {
       try {
-        const creator = await store.findById(task.assignerId);
-        if (creator && creator.id !== actor.id) {
-          await emailTaskCompleted({
-            to: creator.email,
-            creatorName: creator.name,
-            taskTitle: task.title,
-            byName: actor.name,
-            taskId: task.id,
-          });
+        if (notifySubmitTo) {
+          const creator = await store.findById(notifySubmitTo);
+          if (creator && creator.id !== actor.id && creator.email) {
+            await emailTaskSubmitted({
+              to: creator.email,
+              creatorName: creator.name,
+              byName: actor.name,
+              taskTitle: task.title,
+              taskId: task.id,
+            });
+          }
+        }
+        if (notifyReturnTo) {
+          const u = await store.findById(notifyReturnTo.id);
+          if (u && u.email) {
+            await emailSubmissionReturned({
+              to: u.email,
+              assigneeName: u.name,
+              byName: actor.name,
+              taskTitle: task.title,
+              taskId: task.id,
+              reason: notifyReturnTo.reason,
+            });
+          }
+        }
+        if (completedNow) {
+          const creator = await store.findById(task.assignerId);
+          if (creator && creator.id !== actor.id && creator.email) {
+            await emailTaskCompleted({
+              to: creator.email,
+              creatorName: creator.name,
+              taskTitle: task.title,
+              byName: actor.name,
+              taskId: task.id,
+            });
+          }
         }
       } catch (err) {
         console.error("Task notification failed:", err);
@@ -1043,5 +1256,5 @@ export async function transitionTask(
     });
   }
 
-  return toDTO(task);
+  return viewTask(actor, task);
 }

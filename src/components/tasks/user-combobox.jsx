@@ -43,10 +43,37 @@ export function UserCombobox({
       .slice(0, 8);
   }, [users, value, query]);
 
+  // Quick "add a whole group" buttons (multi-select only). One per role that has
+  // at least one not-yet-selected person, plus "Everyone". Lets a creator assign
+  // e.g. all Teachers at once instead of picking them one by one.
+  const groups = useMemo(() => {
+    if (single) return [];
+    const byRole = new Map();
+    for (const u of users) {
+      if (!byRole.has(u.role)) byRole.set(u.role, []);
+      byRole.get(u.role).push(u.id);
+    }
+    return [...byRole.entries()]
+      .map(([role, ids]) => ({
+        role,
+        ids,
+        remaining: ids.filter((id) => !value.includes(id)).length,
+      }))
+      .filter((g) => g.remaining > 0)
+      .sort((a, b) => (a.role < b.role ? -1 : 1));
+  }, [users, value, single]);
+
   function add(id) {
     onChange(single ? [id] : [...value, id]);
     setQuery("");
     if (single) setOpen(false);
+  }
+  function addMany(ids) {
+    // Union with the current selection, preserving order and avoiding dupes.
+    const next = [...value];
+    for (const id of ids) if (!next.includes(id)) next.push(id);
+    onChange(next);
+    setQuery("");
   }
   function remove(id) {
     onChange(value.filter((x) => x !== id));
@@ -81,6 +108,30 @@ export function UserCombobox({
                 <X className="size-3.5" />
               </button>
             </span>
+          ))}
+        </div>
+      )}
+
+      {groups.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {users.length > 1 && (
+            <button
+              type="button"
+              onClick={() => addMany(users.map((u) => u.id))}
+              className="inline-flex items-center gap-1 rounded-full border border-dashed px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+            >
+              + Everyone
+            </button>
+          )}
+          {groups.map((g) => (
+            <button
+              key={g.role}
+              type="button"
+              onClick={() => addMany(g.ids)}
+              className="inline-flex items-center gap-1 rounded-full border border-dashed px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+            >
+              + All {g.role} ({g.remaining})
+            </button>
           ))}
         </div>
       )}

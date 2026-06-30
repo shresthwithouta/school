@@ -17,6 +17,10 @@ import {
   ListTree,
   UserPlus,
   Paperclip,
+  Send,
+  Check,
+  Undo2,
+  Lock,
 } from "lucide-react";
 
 import {
@@ -38,6 +42,7 @@ import { StatusBadge, PriorityBadge } from "@/components/tasks/task-badges";
 import { StatusSelect } from "@/components/tasks/status-select";
 import { TaskDialog } from "@/components/tasks/task-dialog";
 import { SubtaskDialog } from "@/components/tasks/subtask-dialog";
+import { SubmitReviewDialog } from "@/components/tasks/submit-review-dialog";
 import { UserCombobox } from "@/components/tasks/user-combobox";
 import { CommentThread } from "@/components/tasks/comment-thread";
 import { RichText } from "@/components/rich-text";
@@ -64,24 +69,30 @@ export function TaskPageClient({ task, assignees, currentUser }) {
 
   const mine = task.assignees.find((a) => a.id === currentUser.id) ?? null;
   const isManager = currentUser.tier === "OWNER" || currentUser.tier === "ADMIN";
+  // Only the Chairman (Owner tier) can save a file into the repository.
+  const isChairman = currentUser.tier === "OWNER";
+  const [savingId, setSavingId] = useState(null);
   const canEdit = currentUser.id === task.assignerId;
   // Anyone collaborating on the task (creator, an assignee, or a manager) can
   // drive its workflow and add subtasks — not just the creator.
   const involved = canEdit || isManager || !!mine;
   const canControl = involved;
+  // The task creator or a manager reviews submissions (approve / send back).
+  const canReview = canEdit || isManager;
   const isClosed = task.status === "completed" || task.status === "cancelled";
+  // An assignee submits their part for review (with a note) when it's still open.
+  const canSubmit = !isClosed && !!mine && (mine.status === "assigned" || mine.status === "in_progress");
 
   // Jira-style status switcher options (each maps to a transition action). A
   // closed task only offers Reopen; an open one offers the work transitions.
+  // Assignees no longer close their own work — that's the "Submit for review"
+  // button (it needs a note, so it's a dialog rather than a plain option).
   const statusOptions = [];
   if (isClosed) {
     if (canControl) statusOptions.push({ value: "reopen", label: "Reopen" });
   } else {
-    if (mine && mine.status !== "completed") {
-      if (mine.status !== "in_progress")
-        statusOptions.push({ value: "start", label: "In progress" });
-      statusOptions.push({ value: "complete", label: "Completed" });
-    }
+    if (mine && mine.status === "assigned")
+      statusOptions.push({ value: "start", label: "In progress" });
     if (canControl) statusOptions.push({ value: "cancel", label: "Cancelled" });
   }
 
@@ -137,8 +148,44 @@ export function TaskPageClient({ task, assignees, currentUser }) {
     api(`/api/tasks/${task.id}`, "PATCH", { assigneeIds: ids }, "assignees");
   }
 
+  // Chairman-only: copy a submitted file into the central repository.
+  async function saveToRepo(a) {
+    setSavingId(a.id);
+    const res = await fetch("/api/repository", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: a.url,
+        publicId: a.publicId,
+        resourceType: a.resourceType,
+        format: a.format,
+        bytes: a.bytes,
+        name: a.name,
+        kind: a.kind,
+        sourceType: "task",
+        sourceId: task.id,
+        sourceTitle: task.title,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setSavingId(null);
+    if (!res.ok) {
+      toast.error(data.error ?? "Could not save to repository");
+      return;
+    }
+    toast.success("Saved to repository");
+  }
+
   const assigneeIds = task.assignees.map((a) => a.id);
   const doneSubs = task.subtasks.filter((s) => s.status === "done").length;
+
+  // People who can be @mentioned in a comment: the task creator and its
+  // assignees (deduped). When the creator mentions someone the comment is
+  // private — the comment editor warns and enforces a 50-char minimum.
+  const participants = [
+    { id: task.assignerId, name: task.assignerName, role: task.assignerRole },
+    ...task.assignees.map((a) => ({ id: a.id, name: a.name, role: a.role })),
+  ].filter((p, i, arr) => p.id && arr.findIndex((x) => x.id === p.id) === i);
 
   return (
     <div className="space-y-6">
@@ -341,6 +388,8 @@ export function TaskPageClient({ task, assignees, currentUser }) {
                   )
                 }
                 canRemove={(a) => a.uploadedById === currentUser.id || canEdit}
+                onSave={isChairman ? saveToRepo : undefined}
+                savingId={savingId}
               />
               <AttachmentUploader
                 onAdd={(a) =>
@@ -359,7 +408,13 @@ export function TaskPageClient({ task, assignees, currentUser }) {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <CommentThread taskId={task.id} comments={task.comments} />
+              <CommentThread
+                taskId={task.id}
+                comments={task.comments}
+                participants={participants}
+                currentUser={currentUser}
+                isCreator={canEdit}
+              />
             </CardContent>
           </Card>
         </div>
@@ -382,6 +437,23 @@ export function TaskPageClient({ task, assignees, currentUser }) {
                   />
                 ) : (
                   <StatusBadge status={task.status} />
+                )}
+                {canSubmit && (
+                  <SubmitReviewDialog
+                    taskId={task.id}
+                    trigger={
+                      <Button size="sm" className="mt-2 w-full">
+                        <Send className="size-4" />
+                        Submit for review
+                      </Button>
+                    }
+                  />
+                )}
+                {mine && mine.status === "submitted" && (
+                  <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-violet-600 dark:text-violet-400">
+                    <Lock className="size-3.5" />
+                    Submitted — awaiting review
+                  </p>
                 )}
               </div>
               <Detail label="Assigned by" value={task.assignerName} sub={task.assignerRole} />
@@ -414,42 +486,85 @@ export function TaskPageClient({ task, assignees, currentUser }) {
                 </p>
               )}
               <ul className="space-y-3">
-                {task.assignees.map((a) => (
-                  <li key={a.id} className="flex items-center gap-2 rounded-lg border p-3">
-                    <Avatar className="size-8">
-                      <AvatarFallback className="bg-primary/10 text-xs text-primary">
-                        {getInitials(a.name)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">
-                        {a.name}
-                        {a.id === currentUser.id && (
-                          <span className="text-muted-foreground"> (you)</span>
+                {task.assignees.map((a) => {
+                  const reviewable = canReview && a.status === "submitted";
+                  return (
+                    <li key={a.id} className="rounded-lg border p-3">
+                      <div className="flex items-center gap-2">
+                        <Avatar className="size-8">
+                          <AvatarFallback className="bg-primary/10 text-xs text-primary">
+                            {getInitials(a.name)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">
+                            {a.name}
+                            {a.id === currentUser.id && (
+                              <span className="text-muted-foreground"> (you)</span>
+                            )}
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground">{a.role}</p>
+                        </div>
+                        {a.status === "completed" ? (
+                          <CheckCircle2 className="size-4 text-emerald-500" />
+                        ) : (
+                          <StatusBadge status={a.status} />
                         )}
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground">{a.role}</p>
-                    </div>
-                    {a.status === "completed" ? (
-                      <CheckCircle2 className="size-4 text-emerald-500" />
-                    ) : (
-                      <StatusBadge status={a.status} />
-                    )}
-                    {canEdit && a.id !== currentUser.id && (
-                      <button
-                        type="button"
-                        title="Unassign"
-                        onClick={() =>
-                          setAssignees(assigneeIds.filter((x) => x !== a.id))
-                        }
-                        disabled={!!busy}
-                        className="text-muted-foreground hover:text-destructive"
-                      >
-                        <X className="size-4" />
-                      </button>
-                    )}
-                  </li>
-                ))}
+                        {canEdit && a.id !== currentUser.id && (
+                          <button
+                            type="button"
+                            title="Unassign"
+                            onClick={() =>
+                              setAssignees(assigneeIds.filter((x) => x !== a.id))
+                            }
+                            disabled={!!busy}
+                            className="text-muted-foreground hover:text-destructive"
+                          >
+                            <X className="size-4" />
+                          </button>
+                        )}
+                      </div>
+                      {reviewable && (
+                        <div className="mt-2 flex gap-2 border-t pt-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="flex-1"
+                            disabled={!!busy}
+                            onClick={() =>
+                              api(
+                                `/api/tasks/${task.id}/transition`,
+                                "POST",
+                                { action: "approve", assigneeId: a.id },
+                                "review"
+                              )
+                            }
+                          >
+                            <Check className="size-4" />
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="flex-1 text-amber-600 dark:text-amber-400"
+                            disabled={!!busy}
+                            onClick={() =>
+                              api(
+                                `/api/tasks/${task.id}/transition`,
+                                "POST",
+                                { action: "sendback", assigneeId: a.id },
+                                "review"
+                              )
+                            }
+                          >
+                            <Undo2 className="size-4" />
+                            Send back
+                          </Button>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
 
               {canEdit && (

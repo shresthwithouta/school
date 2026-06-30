@@ -4,7 +4,16 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, Trash2, ChevronRight } from "lucide-react";
+import {
+  ArrowLeft,
+  Trash2,
+  ChevronRight,
+  Play,
+  Send,
+  Check,
+  Undo2,
+  Lock,
+} from "lucide-react";
 
 import {
   AlertDialog,
@@ -34,20 +43,27 @@ import { PriorityBadge } from "@/components/tasks/task-badges";
 import { RichText, RichTextEditor } from "@/components/rich-text";
 import { formatDateMaybeTime } from "@/lib/utils";
 import {
-  SUBTASK_STATUSES,
   SUBTASK_STATUS_META,
   TASK_PRIORITIES,
   PRIORITY_META,
 } from "@/lib/task-meta";
 
-export function SubtaskPageClient({ task, sub, assignees, canEdit, canDelete, currentUserId }) {
+export function SubtaskPageClient({
+  task,
+  sub,
+  assignees,
+  canEdit,
+  canDelete,
+  canReview,
+  currentUserId,
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [title, setTitle] = useState(sub.title);
   const [desc, setDesc] = useState(sub.description ?? "");
 
   const priority = sub.priority ?? "medium";
-  const canStatus = canEdit || sub.assigneeId === currentUserId;
+  const isAssignee = sub.assigneeId === currentUserId;
   const base = `/api/tasks/${task.id}/subtasks/${sub.id}`;
 
   async function patch(body, successMsg) {
@@ -221,22 +237,82 @@ export function SubtaskPageClient({ task, sub, assignees, canEdit, canDelete, cu
 
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">Status</Label>
-              <Select
-                value={sub.status}
-                onValueChange={(v) => patch({ status: v })}
-                disabled={!canStatus || busy}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SUBTASK_STATUSES.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {SUBTASK_STATUS_META[s].label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div>
+                <Badge
+                  variant="outline"
+                  className={SUBTASK_STATUS_META[sub.status].badgeClass}
+                >
+                  {SUBTASK_STATUS_META[sub.status].label}
+                </Badge>
+              </div>
+              {/* Review workflow: the assignee works it and submits for review;
+                  only the creator (or task creator / manager) closes it. */}
+              <div className="flex flex-wrap gap-2 pt-1">
+                {isAssignee && sub.status === "todo" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => patch({ status: "in_progress" }, "Started")}
+                  >
+                    <Play className="size-4" />
+                    Start
+                  </Button>
+                )}
+                {isAssignee &&
+                  (sub.status === "todo" || sub.status === "in_progress") && (
+                    <Button
+                      size="sm"
+                      disabled={busy}
+                      onClick={() =>
+                        patch({ status: "submitted" }, "Submitted for review")
+                      }
+                    >
+                      <Send className="size-4" />
+                      Submit for review
+                    </Button>
+                  )}
+                {canReview && sub.status === "submitted" && (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => patch({ status: "done" }, "Approved")}
+                    >
+                      <Check className="size-4" />
+                      Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-amber-600 dark:text-amber-400"
+                      disabled={busy}
+                      onClick={() => patch({ status: "in_progress" }, "Sent back")}
+                    >
+                      <Undo2 className="size-4" />
+                      Send back
+                    </Button>
+                  </>
+                )}
+                {canReview && sub.status === "done" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => patch({ status: "in_progress" }, "Reopened")}
+                  >
+                    <Undo2 className="size-4" />
+                    Reopen
+                  </Button>
+                )}
+              </div>
+              {sub.status === "submitted" && (
+                <p className="inline-flex items-center gap-1.5 text-xs text-violet-600 dark:text-violet-400">
+                  <Lock className="size-3.5" />
+                  Awaiting the creator&apos;s approval.
+                </p>
+              )}
             </div>
 
             <div className="space-y-1.5">

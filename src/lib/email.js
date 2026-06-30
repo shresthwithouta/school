@@ -61,6 +61,8 @@ export async function sendEmail(opts) {
     await transporter.sendMail({
       from: FROM,
       to: opts.to,
+      // cc may be a single address or an array — nodemailer accepts both.
+      ...(opts.cc && opts.cc.length ? { cc: opts.cc } : {}),
       subject: opts.subject,
       html: opts.html,
     });
@@ -81,15 +83,47 @@ export function meetingUrl(meetingId) {
   return `${baseUrl()}/meetings/${meetingId}`;
 }
 
+/** A "When:" / "Join link:" detail block for meeting emails (omits blank rows). */
+function meetingDetails(args) {
+  const rows = [];
+  if (args.when) {
+    rows.push(
+      `<div style="margin-top:6px"><span style="color:#64748b">When:</span> <strong>${esc(args.when)}</strong></div>`
+    );
+  }
+  if (args.link) {
+    rows.push(
+      `<div style="margin-top:6px"><span style="color:#64748b">Join link:</span> <a href="${esc(args.link)}" style="color:#4f46e5">${esc(args.link)}</a></div>`
+    );
+  }
+  return rows.join("");
+}
+
 export async function emailMeetingInvite(args) {
   await sendEmail({
     to: args.to,
     subject: `Meeting invite: ${args.title}`,
     html: layout(
       "You've been invited to a meeting",
-      `Hi ${esc(args.attendeeName)}, <strong>${esc(args.byName)}</strong> invited you to <strong>${esc(args.title)}</strong>${
-        args.when ? ` on <strong>${esc(args.when)}</strong>` : ""
-      }. Open it to join and follow the discussion.`,
+      `Hi ${esc(args.attendeeName)}, <strong>${esc(args.byName)}</strong> invited you to <strong>${esc(args.title)}</strong>. Open it to join and follow the discussion.${meetingDetails(args)}`,
+      { label: "Open meeting", href: meetingUrl(args.meetingId) }
+    ),
+  });
+}
+
+/**
+ * One meeting invite for the whole group: addressed to the organizer with every
+ * attendee in CC, so the team can see who else is invited (instead of N separate
+ * emails). Includes the schedule and the join link. Used for 2+ invitees.
+ */
+export async function emailMeetingInviteGroup(args) {
+  await sendEmail({
+    to: args.to,
+    cc: args.cc,
+    subject: `Meeting invite: ${args.title}`,
+    html: layout(
+      "You've been invited to a meeting",
+      `<strong>${esc(args.byName)}</strong> invited ${esc(args.attendeeNames)} to <strong>${esc(args.title)}</strong>. Open it to join and follow the discussion.${meetingDetails(args)}`,
       { label: "Open meeting", href: meetingUrl(args.meetingId) }
     ),
   });
@@ -102,6 +136,24 @@ export async function emailTaskAssigned(args) {
     html: layout(
       "You've been added to a task",
       `Hi ${esc(args.assigneeName)}, <strong>${esc(args.assignerName)}</strong> assigned you to the task <strong>${esc(args.taskTitle)}</strong>. Open it to get started.`,
+      { label: "Open task", href: taskUrl(args.taskId) }
+    ),
+  });
+}
+
+/**
+ * One assignment email for a whole group: addressed to the assigner with every
+ * assignee in CC, so the team can see who else is on the task (instead of N
+ * separate, isolated emails). Used when more than one person is assigned at once.
+ */
+export async function emailTaskAssignedGroup(args) {
+  await sendEmail({
+    to: args.to,
+    cc: args.cc,
+    subject: `New task assigned: ${args.taskTitle}`,
+    html: layout(
+      "A task was assigned to your team",
+      `<strong>${esc(args.assignerName)}</strong> assigned the task <strong>${esc(args.taskTitle)}</strong> to ${esc(args.assigneeNames)}. Open it to get started.`,
       { label: "Open task", href: taskUrl(args.taskId) }
     ),
   });
@@ -127,6 +179,47 @@ export async function emailTaskCompleted(args) {
       "A task was completed ✅",
       `Hi ${esc(args.creatorName)}, <strong>${esc(args.byName)}</strong> completed the task <strong>${esc(args.taskTitle)}</strong>.`,
       { label: "View task", href: taskUrl(args.taskId) }
+    ),
+  });
+}
+
+/** To the assigner: an assignee submitted their part for review. */
+export async function emailTaskSubmitted(args) {
+  await sendEmail({
+    to: args.to,
+    subject: `Submitted for review: ${args.taskTitle}`,
+    html: layout(
+      "Work submitted for review 📝",
+      `Hi ${esc(args.creatorName)}, <strong>${esc(args.byName)}</strong> submitted their part of <strong>${esc(args.taskTitle)}</strong> for your review. Open it to approve or send it back.`,
+      { label: "Review task", href: taskUrl(args.taskId) }
+    ),
+  });
+}
+
+/** To the assignee: their submission was sent back for changes. */
+export async function emailSubmissionReturned(args) {
+  await sendEmail({
+    to: args.to,
+    subject: `Changes requested: ${args.taskTitle}`,
+    html: layout(
+      "Your submission was sent back",
+      `Hi ${esc(args.assigneeName)}, <strong>${esc(args.byName)}</strong> sent your submission for <strong>${esc(args.taskTitle)}</strong> back for changes.${
+        args.reason ? ` Reason: ${esc(args.reason)}.` : ""
+      } Open it to update and resubmit.`,
+      { label: "Open task", href: taskUrl(args.taskId) }
+    ),
+  });
+}
+
+/** To a mentioned person: they were @mentioned in a (private) task comment. */
+export async function emailMention(args) {
+  await sendEmail({
+    to: args.to,
+    subject: `You were mentioned: ${args.taskTitle}`,
+    html: layout(
+      "You were mentioned in a comment",
+      `Hi ${esc(args.mentionedName)}, <strong>${esc(args.byName)}</strong> mentioned you in a comment on <strong>${esc(args.taskTitle)}</strong>. Open the task to read it and reply.`,
+      { label: "Open task", href: taskUrl(args.taskId) }
     ),
   });
 }

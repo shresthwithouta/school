@@ -27,6 +27,13 @@ export default async function SubtaskPage({ params }) {
     user.id === task.assignerId ||
     task.assignees.some((a) => a.id === user.id) ||
     isManager;
+  // Who may approve / send back this subtask: the person who raised it (its
+  // creator), the task creator, or a manager. The assignee submits but can't
+  // close their own subtask.
+  const canReview =
+    user.id === (sub.createdById || task.assignerId) ||
+    user.id === task.assignerId ||
+    isManager;
 
   return (
     <SubtaskPageClient
@@ -35,6 +42,7 @@ export default async function SubtaskPage({ params }) {
       assignees={assignees}
       canEdit={involved}
       canDelete={user.id === task.assignerId}
+      canReview={canReview}
       currentUserId={user.id}
     />
   );

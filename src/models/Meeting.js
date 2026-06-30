@@ -11,6 +11,8 @@ const MeetingSchema = new Schema(
     rev: { type: Number, default: 0 },
     title: { type: String, required: true },
     description: { type: String, default: "" },
+    // Optional external video-call link (Zoom / Google Meet / Teams URL).
+    link: { type: String, default: "" },
     scheduledAt: { type: String, default: null },
     // Final discussion bullet points: { id, text, done, created*, done* }
     decisions: { type: [Mixed], default: [] },

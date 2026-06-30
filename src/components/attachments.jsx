@@ -10,6 +10,7 @@ import {
   X,
   FileText,
   Download,
+  FolderPlus,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -123,6 +124,8 @@ export function AttachmentList({
   attachments,
   onRemove,
   canRemove,
+  onSave,
+  savingId,
 }
 
 
@@ -158,6 +161,21 @@ export function AttachmentList({
             >
               <Download className="size-4" />
             </a>
+            {onSave && (
+              <button
+                type="button"
+                onClick={() => onSave(a)}
+                disabled={savingId === a.id}
+                className="text-muted-foreground hover:text-primary disabled:opacity-50"
+                title="Save to repository"
+              >
+                {savingId === a.id ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <FolderPlus className="size-4" />
+                )}
+              </button>
+            )}
             {onRemove && (!canRemove || canRemove(a)) && (
               <button
                 type="button"

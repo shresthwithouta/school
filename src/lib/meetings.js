@@ -5,7 +5,7 @@ import { after } from "next/server";
 import { connectToDatabase, stripMongo } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { cleanHtml } from "@/lib/sanitize";
-import { emailMeetingInvite } from "@/lib/email";
+import { emailMeetingInvite, emailMeetingInviteGroup } from "@/lib/email";
 import { canManage, isOwner } from "@/lib/rbac";
 import { listVisibleUsers } from "@/lib/users";
 import { destroyAsset } from "@/lib/cloudinary";
@@ -273,6 +273,34 @@ export async function getMeetingForActor(
 }
 
 // ── Mutations ──────────────────────────────────────────────────────
+// Invite notifications. One invitee → a personalized email. Several at once →
+// a single email to the organizer with everyone in CC, so the group can see who
+// else is invited (instead of N isolated emails). Always carries the schedule
+// and the join link. `recipients` is [{ email, name }] and excludes the actor.
+function sendInviteEmails(actor, meeting, recipients) {
+  const valid = recipients.filter((r) => r.email);
+  if (valid.length === 0) return Promise.resolve();
+  const when = meeting.scheduledAt
+    ? new Date(meeting.scheduledAt).toLocaleString("en-GB")
+    : undefined;
+  const base = {
+    title: meeting.title,
+    byName: actor.name,
+    meetingId: meeting.id,
+    when,
+    link: meeting.link || "",
+  };
+  if (valid.length === 1) {
+    return emailMeetingInvite({ ...base, to: valid[0].email, attendeeName: valid[0].name });
+  }
+  return emailMeetingInviteGroup({
+    ...base,
+    to: actor.email,
+    cc: valid.map((r) => r.email),
+    attendeeNames: valid.map((r) => r.name).join(", "),
+  });
+}
+
 export async function createMeeting(
   actor,
   input
@@ -297,6 +325,7 @@ export async function createMeeting(
     key: `ME-${keyNum(meetingId)}`,
     title: input.title.trim(),
     description: cleanHtml(input.description),
+    link: (input.link ?? "").trim(),
     scheduledAt: input.scheduledAt ? new Date(input.scheduledAt).toISOString() : null,
     createdById: actor.id,
     createdByName: actor.name,
@@ -314,28 +343,14 @@ export async function createMeeting(
   await save(meeting);
 
   // Notify invitees best-effort, after the response is sent — never block the
-  // save on a burst of SMTP handshakes.
-  const whenStr = meeting.scheduledAt
-    ? new Date(meeting.scheduledAt).toLocaleString("en-GB")
-    : undefined;
+  // save on a burst of SMTP handshakes. One group email (organizer + CC) when
+  // there's more than one invitee.
   const invites = attendees
-    .map((a) => ({ user: allowed.get(a.id), name: a.name }))
-    .filter((r) => r.user);
+    .filter((a) => a.id !== actor.id)
+    .map((a) => ({ email: allowed.get(a.id)?.email, name: a.name }))
+    .filter((r) => r.email);
   if (invites.length) {
-    after(() =>
-      Promise.allSettled(
-        invites.map((r) =>
-          emailMeetingInvite({
-            to: r.user.email,
-            attendeeName: r.name,
-            title: meeting.title,
-            byName: actor.name,
-            meetingId: meeting.id,
-            when: whenStr,
-          })
-        )
-      )
-    );
+    after(() => sendInviteEmails(actor, meeting, invites));
   }
 
   return toDTO(meeting);
@@ -354,6 +369,7 @@ export async function updateMeeting(
 
   if (input.title !== undefined) m.title = input.title.trim();
   if (input.description !== undefined) m.description = cleanHtml(input.description);
+  if (input.link !== undefined) m.link = (input.link ?? "").trim();
   if (input.scheduledAt !== undefined) {
     m.scheduledAt = input.scheduledAt
       ? new Date(input.scheduledAt).toISOString()
@@ -373,7 +389,7 @@ export async function updateMeeting(
       const cur = existing.get(cid);
       if (cur) return cur;
       const u = allowed.get(cid);
-      newlyInvited.push({ to: u.email, name: u.name });
+      if (u.id !== actor.id) newlyInvited.push({ email: u.email, name: u.name });
       return { id: u.id, name: u.name, role: u.role, status: "invited", joinedAt: null };
     });
   }
@@ -381,24 +397,8 @@ export async function updateMeeting(
   m.updatedAt = now();
   await save(m);
 
-  const whenStr = m.scheduledAt
-    ? new Date(m.scheduledAt).toLocaleString("en-GB")
-    : undefined;
   if (newlyInvited.length) {
-    after(() =>
-      Promise.allSettled(
-        newlyInvited.map((r) =>
-          emailMeetingInvite({
-            to: r.to,
-            attendeeName: r.name,
-            title: m.title,
-            byName: actor.name,
-            meetingId: m.id,
-            when: whenStr,
-          })
-        )
-      )
-    );
+    after(() => sendInviteEmails(actor, m, newlyInvited));
   }
 
   return toDTO(m);

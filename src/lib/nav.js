@@ -4,6 +4,7 @@ import {
   ListChecks,
   CalendarClock,
   CalendarDays,
+  FolderArchive,
   Users,
   BarChart3,
   Settings,
@@ -34,6 +35,9 @@ export const NAV_SECTIONS = [
       { title: "Tasks", href: "/tasks", icon: ListChecks },
       { title: "Meetings", href: "/meetings", icon: CalendarClock },
       { title: "Calendar", href: "/calendar", icon: CalendarDays },
+      // Everyone has a Repository view — the Chairman sees all saved files and
+      // manages them; others see only files shared with them.
+      { title: "Repository", href: "/repository", icon: FolderArchive },
     ],
   },
   {
