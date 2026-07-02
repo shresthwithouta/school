@@ -73,6 +73,9 @@ export function TaskPageClient({ task, assignees, currentUser }) {
   const isChairman = currentUser.tier === "OWNER";
   const [savingId, setSavingId] = useState(null);
   const canEdit = currentUser.id === task.assignerId;
+  // The creator can delete their own task; the Chairman/Director (Owner) can
+  // delete any task. Mirrors canDeleteTask in lib/tasks.js.
+  const canDelete = canEdit || currentUser.tier === "OWNER";
   // Anyone collaborating on the task (creator, an assignee, or a manager) can
   // drive its workflow and add subtasks — not just the creator.
   const involved = canEdit || isManager || !!mine;
@@ -227,7 +230,7 @@ export function TaskPageClient({ task, assignees, currentUser }) {
               }
             />
           )}
-          {canEdit && (
+          {canDelete && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="outline" size="sm" className="text-destructive">

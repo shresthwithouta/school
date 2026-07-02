@@ -381,9 +381,15 @@ function canControlTask(actor, task) {
   return isInvolved(actor, task);
 }
 
-// Only the creator (assigner) may edit/delete the task itself.
+// Only the creator (assigner) may edit the task itself.
 function canEdit(actor, task) {
   return actor.id === task.assignerId;
+}
+
+// Deletion is broader than editing: the creator can delete their own task, and
+// the Chairman/Director (Owner) can delete ANY task for oversight/cleanup.
+function canDeleteTask(actor, task) {
+  return canEdit(actor, task) || isOwner(actor.role);
 }
 
 // ── Queries ────────────────────────────────────────────────────────
@@ -740,7 +746,7 @@ export async function deleteTask(
 ) {
   const task = await rawById(id);
   if (!task) throw new AppError("Task not found.", 404);
-  if (!canEdit(actor, task)) {
+  if (!canDeleteTask(actor, task)) {
     throw new AppError("You are not allowed to delete this task.", 403);
   }
   // Collect every Cloudinary asset this task owns — task-level attachments plus
