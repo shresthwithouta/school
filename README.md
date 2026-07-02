@@ -2,7 +2,7 @@
 
 A centralized platform to assign, track, review, approve and evaluate tasks across
 all school stakeholders — Chairman, Principal, Coordinators, Managers, Accountants,
-Teachers and Team Members. Built with a role-based visibility hierarchy.
+Teachers and Team Members. Built with a role-based visibility hierarchy
 
 Built so far: authentication + role hierarchy, dashboards, team management, profiles
 with photo upload, a full **Tasks** module (multi-assignee lifecycle, subtasks, rich
