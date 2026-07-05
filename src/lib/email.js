@@ -159,6 +159,25 @@ export async function emailTaskAssignedGroup(args) {
   });
 }
 
+/**
+ * To an assignee: today's occurrence of a recurring task was generated. Sent
+ * fresh each period by the recurring-task job (see spawnDueRecurringTasks).
+ */
+export async function emailTaskRecurring(args) {
+  const cadence = args.freq === "weekdays" ? "daily (Mon–Sat)" : "daily";
+  await sendEmail({
+    to: args.to,
+    subject: `Today's task: ${args.taskTitle}`,
+    html: layout(
+      "Your recurring task for today 🔁",
+      `Hi ${esc(args.assigneeName)}, this is your ${esc(cadence)} task <strong>${esc(args.taskTitle)}</strong>${
+        args.assignerName ? `, set by <strong>${esc(args.assignerName)}</strong>` : ""
+      }. It's due by the end of today — open it to complete and submit.`,
+      { label: "Open task", href: taskUrl(args.taskId) }
+    ),
+  });
+}
+
 export async function emailSubtaskAssigned(args) {
   await sendEmail({
     to: args.to,

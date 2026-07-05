@@ -9,12 +9,12 @@ import {
   Trash2,
   Pencil,
   X,
-  ChevronRight,
   CheckCircle2,
   MessageSquare,
   History,
   Plus,
   ListTree,
+  ClipboardList,
   UserPlus,
   Paperclip,
   Send,
@@ -38,7 +38,19 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { StatusBadge, PriorityBadge } from "@/components/tasks/task-badges";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  StatusBadge,
+  PriorityBadge,
+  RecurringBadge,
+} from "@/components/tasks/task-badges";
 import { StatusSelect } from "@/components/tasks/status-select";
 import { TaskDialog } from "@/components/tasks/task-dialog";
 import { SubtaskDialog } from "@/components/tasks/subtask-dialog";
@@ -54,6 +66,7 @@ import {
   formatDateTime,
   formatDateMaybeTime,
   getInitials,
+  toPlainText,
 } from "@/lib/utils";
 
 export function TaskPageClient({ task, assignees, currentUser }) {
@@ -181,6 +194,10 @@ export function TaskPageClient({ task, assignees, currentUser }) {
 
   const assigneeIds = task.assignees.map((a) => a.id);
   const doneSubs = task.subtasks.filter((s) => s.status === "done").length;
+  const subPct = task.subtasks.length
+    ? Math.round((doneSubs / task.subtasks.length) * 100)
+    : 0;
+  const doneAssignees = task.assignees.filter((a) => a.status === "completed").length;
 
   // People who can be @mentioned in a comment: the task creator and its
   // assignees (deduped). When the creator mentions someone the comment is
@@ -206,6 +223,7 @@ export function TaskPageClient({ task, assignees, currentUser }) {
             <span className="font-mono text-sm text-muted-foreground">{task.key}</span>
             <StatusBadge status={task.status} />
             <PriorityBadge priority={task.priority} />
+            <RecurringBadge recurrence={task.recurrence} />
             {task.delayed && task.daysLate > 0 && (
               <span className="text-xs font-medium text-rose-600 dark:text-rose-400">
                 {task.daysLate} day{task.daysLate === 1 ? "" : "s"} late
@@ -267,6 +285,144 @@ export function TaskPageClient({ task, assignees, currentUser }) {
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Main column */}
         <div className="space-y-6 lg:col-span-2">
+          {/* Summary — every key detail of the task at a glance, in one table. */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ClipboardList className="size-4" />
+                Summary
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-hidden rounded-lg border">
+                <Table>
+                  <TableBody>
+                    <SummaryRow label="Task">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {task.key}
+                        </span>
+                        <span className="font-medium">{task.title}</span>
+                      </span>
+                    </SummaryRow>
+                    <SummaryRow label="Status">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <StatusBadge status={task.status} />
+                        {task.delayed && task.daysLate > 0 && (
+                          <span className="text-xs font-medium text-rose-600 dark:text-rose-400">
+                            {task.daysLate} day{task.daysLate === 1 ? "" : "s"} late
+                          </span>
+                        )}
+                      </span>
+                    </SummaryRow>
+                    <SummaryRow label="Priority">
+                      <PriorityBadge priority={task.priority} />
+                    </SummaryRow>
+                    <SummaryRow label="Repeats">
+                      {task.recurrence?.freq ? (
+                        <RecurringBadge recurrence={task.recurrence} />
+                      ) : (
+                        <span className="text-muted-foreground">Doesn&apos;t repeat</span>
+                      )}
+                    </SummaryRow>
+                    <SummaryRow label="Assigned by">
+                      <span className="flex items-center gap-2">
+                        <Avatar className="size-6">
+                          <AvatarFallback className="bg-primary/10 text-[10px] text-primary">
+                            {getInitials(task.assignerName)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span>
+                          <span className="font-medium">{task.assignerName}</span>
+                          {task.assignerRole && (
+                            <span className="text-muted-foreground">
+                              {" "}
+                              · {task.assignerRole}
+                            </span>
+                          )}
+                        </span>
+                      </span>
+                    </SummaryRow>
+                    <SummaryRow label={`Assignees (${task.assignees.length})`}>
+                      {task.assignees.length === 0 ? (
+                        <span className="text-muted-foreground">
+                          Draft — no one assigned yet
+                        </span>
+                      ) : (
+                        <span className="flex flex-wrap gap-1.5">
+                          {task.assignees.map((a) => (
+                            <span
+                              key={a.id}
+                              className="inline-flex items-center gap-1.5 rounded-full border bg-muted/40 px-2 py-0.5 text-xs"
+                            >
+                              <Avatar className="size-4">
+                                <AvatarFallback className="bg-primary/10 text-[9px] text-primary">
+                                  {getInitials(a.name)}
+                                </AvatarFallback>
+                              </Avatar>
+                              {a.name}
+                              {a.status === "completed" && (
+                                <CheckCircle2 className="size-3 text-emerald-500" />
+                              )}
+                            </span>
+                          ))}
+                        </span>
+                      )}
+                    </SummaryRow>
+                    <SummaryRow label="Due date">
+                      <span
+                        className={cn(
+                          task.delayed && "font-medium text-rose-600 dark:text-rose-400"
+                        )}
+                      >
+                        {task.dueDate ? formatDateMaybeTime(task.dueDate) : "—"}
+                      </span>
+                    </SummaryRow>
+                    <SummaryRow label="Progress">
+                      {task.assignees.length > 0 ? (
+                        <span className="text-muted-foreground">
+                          <span className="font-medium text-foreground">
+                            {doneAssignees}
+                          </span>{" "}
+                          of {task.assignees.length} assignee
+                          {task.assignees.length === 1 ? "" : "s"} approved
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </SummaryRow>
+                    <SummaryRow label="Subtasks">
+                      {task.subtasks.length === 0 ? (
+                        <span className="text-muted-foreground">None</span>
+                      ) : (
+                        <span className="flex items-center gap-2">
+                          <span
+                            className="h-1.5 w-24 overflow-hidden rounded-full bg-muted"
+                            role="progressbar"
+                            aria-valuenow={subPct}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                          >
+                            <span
+                              className="block h-full rounded-full bg-emerald-500"
+                              style={{ width: `${subPct}%` }}
+                            />
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {doneSubs}/{task.subtasks.length} done
+                          </span>
+                        </span>
+                      )}
+                    </SummaryRow>
+                    <SummaryRow label="Created">
+                      {formatDateTime(task.createdAt)}
+                    </SummaryRow>
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Description */}
           <Card>
             <CardHeader>
@@ -300,60 +456,126 @@ export function TaskPageClient({ task, assignees, currentUser }) {
                   No subtasks. Break this task down into smaller pieces.
                 </p>
               )}
-              <ul className="space-y-2">
-                {task.subtasks.map((s) => (
-                  <li key={s.id} className="flex items-center gap-1.5">
-                    <Link
-                      href={`/tasks/${task.key}/${s.key}`}
-                      className="flex min-w-0 flex-1 items-center gap-3 rounded-lg border p-2.5 transition-colors hover:border-primary/40 hover:bg-accent/40"
-                    >
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {s.key}
-                      </span>
-                      <span
-                        className={cn(
-                          "min-w-0 flex-1 truncate text-sm",
-                          s.status === "done" && "text-muted-foreground line-through"
+              {task.subtasks.length > 0 && (
+                <div className="overflow-hidden rounded-lg border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/40 hover:bg-muted/40">
+                        <TableHead>Subtask</TableHead>
+                        <TableHead>Assignee</TableHead>
+                        <TableHead>Priority</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Expected</TableHead>
+                        {involved && (
+                          <TableHead className="w-10 text-right">Edit</TableHead>
                         )}
-                      >
-                        {s.title}
-                      </span>
-                      {s.assigneeName && (
-                        <Avatar className="size-6" title={s.assigneeName}>
-                          <AvatarFallback className="bg-primary/10 text-[10px] text-primary">
-                            {getInitials(s.assigneeName)}
-                          </AvatarFallback>
-                        </Avatar>
-                      )}
-                      <Badge
-                        variant="outline"
-                        className={SUBTASK_STATUS_META[s.status].badgeClass}
-                      >
-                        {SUBTASK_STATUS_META[s.status].label}
-                      </Badge>
-                      <ChevronRight className="size-4 text-muted-foreground" />
-                    </Link>
-                    {involved && (
-                      <SubtaskDialog
-                        task={{ id: task.id, key: task.key }}
-                        sub={s}
-                        assignees={assignees}
-                        currentUserId={currentUser.id}
-                        trigger={
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            title="Edit subtask"
-                            className="size-9 shrink-0 text-muted-foreground hover:text-foreground"
-                          >
-                            <Pencil className="size-4" />
-                          </Button>
-                        }
-                      />
-                    )}
-                  </li>
-                ))}
-              </ul>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {task.subtasks.map((s) => {
+                        const desc = toPlainText(s.description || "");
+                        return (
+                          <TableRow key={s.id}>
+                            <TableCell className="max-w-[20rem] whitespace-normal align-top">
+                              <Link
+                                href={`/tasks/${task.key}/${s.key}`}
+                                className="group/st block"
+                              >
+                                <span className="flex items-center gap-2">
+                                  <span className="font-mono text-[11px] text-muted-foreground">
+                                    {s.key}
+                                  </span>
+                                  <span
+                                    className={cn(
+                                      "text-sm font-medium group-hover/st:underline",
+                                      s.status === "done" &&
+                                        "text-muted-foreground line-through"
+                                    )}
+                                  >
+                                    {s.title}
+                                  </span>
+                                </span>
+                                {desc && (
+                                  <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                                    {desc}
+                                  </span>
+                                )}
+                              </Link>
+                            </TableCell>
+                            <TableCell className="align-top">
+                              {s.assigneeName ? (
+                                <span className="inline-flex items-center gap-1.5">
+                                  <Avatar className="size-5">
+                                    <AvatarFallback className="bg-primary/10 text-[9px] text-primary">
+                                      {getInitials(s.assigneeName)}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <span className="text-sm">{s.assigneeName}</span>
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">
+                                  Unassigned
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell className="align-top">
+                              <PriorityBadge priority={s.priority || "medium"} />
+                            </TableCell>
+                            <TableCell className="align-top">
+                              <Badge
+                                variant="outline"
+                                className={SUBTASK_STATUS_META[s.status].badgeClass}
+                              >
+                                {SUBTASK_STATUS_META[s.status].label}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="align-top">
+                              {s.expectedDate ? (
+                                <span
+                                  className={cn(
+                                    "text-sm",
+                                    s.overdue &&
+                                      "font-medium text-rose-600 dark:text-rose-400"
+                                  )}
+                                >
+                                  {formatDate(s.expectedDate)}
+                                  {s.overdue && (
+                                    <span className="block text-[10px] font-medium">
+                                      overdue
+                                    </span>
+                                  )}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            {involved && (
+                              <TableCell className="align-top text-right">
+                                <SubtaskDialog
+                                  task={{ id: task.id, key: task.key }}
+                                  sub={s}
+                                  assignees={assignees}
+                                  currentUserId={currentUser.id}
+                                  trigger={
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      title="Edit subtask"
+                                      className="size-8 text-muted-foreground hover:text-foreground"
+                                    >
+                                      <Pencil className="size-4" />
+                                    </Button>
+                                  }
+                                />
+                              </TableCell>
+                            )}
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
 
               {involved && (
                 <Button asChild variant="outline" className="w-full">
@@ -613,6 +835,21 @@ export function TaskPageClient({ task, assignees, currentUser }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// One row of the task Summary table: a muted label cell + a value cell that can
+// hold badges, avatars or plain text. Values wrap; labels stay on one line.
+function SummaryRow({ label, children }) {
+  return (
+    <TableRow className="hover:bg-transparent">
+      <TableCell className="w-40 whitespace-nowrap py-2.5 align-top text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        {label}
+      </TableCell>
+      <TableCell className="whitespace-normal py-2.5 align-top text-sm">
+        {children}
+      </TableCell>
+    </TableRow>
   );
 }
 

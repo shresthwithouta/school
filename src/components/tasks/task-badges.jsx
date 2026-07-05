@@ -1,3 +1,5 @@
+import { Repeat } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
@@ -6,6 +8,7 @@ import {
 
 
 } from "@/lib/task-meta";
+import { describeRecurrence } from "@/lib/recurrence";
 
 export function StatusBadge({
   status,
@@ -40,6 +43,26 @@ export function PriorityBadge({
     >
       <span className={cn("size-1.5 rounded-full", meta.dotClass)} />
       {meta.label}
+    </Badge>
+  );
+}
+
+/**
+ * Marks a recurring-task template (e.g. "Daily", "Mon–Sat"). Renders nothing
+ * for one-off tasks or spawned occurrences (which carry no rule of their own).
+ */
+export function RecurringBadge({ recurrence, className }) {
+  if (!recurrence?.freq) return null;
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "gap-1 font-medium border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-400",
+        className
+      )}
+    >
+      <Repeat className="size-3" />
+      {describeRecurrence(recurrence)}
     </Badge>
   );
 }

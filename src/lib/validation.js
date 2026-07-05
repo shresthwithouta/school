@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ROLES } from "@/lib/rbac";
 import { TASK_PRIORITIES } from "@/lib/task-meta";
+import { RECURRENCE_FREQS } from "@/lib/recurrence";
 
 const roleEnum = z.enum(ROLES);
 const optionalText = (max) =>
@@ -75,6 +76,13 @@ const priorityEnum = z.enum(TASK_PRIORITIES);
 // Rich-text HTML field (sanitized server-side before storing).
 const richText = z.string().max(20000).optional().or(z.literal(""));
 
+// Optional recurrence rule. `null`/absent = a one-off task. Only takes effect
+// when the task has assignees (a recurring draft has no one to remind).
+const recurrence = z
+  .object({ freq: z.enum(RECURRENCE_FREQS) })
+  .nullable()
+  .optional();
+
 export const createTaskSchema = z.object({
   title: z.string().trim().min(2, "Title is too short").max(140),
   description: richText,
@@ -83,6 +91,7 @@ export const createTaskSchema = z.object({
   assigneeIds: z.array(z.string().min(1)).max(200).optional().default([]),
   priority: priorityEnum.default("medium"),
   dueDate: z.string().trim().optional().or(z.literal("")),
+  recurrence,
 });
 
 export const updateTaskSchema = z.object({

@@ -29,7 +29,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { StatusBadge, PriorityBadge } from "@/components/tasks/task-badges";
+import {
+  StatusBadge,
+  PriorityBadge,
+  RecurringBadge,
+} from "@/components/tasks/task-badges";
 import { TASK_PRIORITIES, PRIORITY_META } from "@/lib/task-meta";
 import { cn, formatDate, toPlainText } from "@/lib/utils";
 
@@ -552,8 +556,14 @@ export function TasksClient({ tasks, currentUser }) {
                       </Link>
                       <div className="min-w-0 flex-1">
                         <span className="block truncate font-medium">{t.title}</span>
-                        <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
-                          {t.key}
+                        <span className="mt-0.5 flex items-center gap-2">
+                          <span className="font-mono text-[11px] text-muted-foreground">
+                            {t.key}
+                          </span>
+                          <RecurringBadge
+                            recurrence={t.recurrence}
+                            className="relative z-2 gap-0.5 px-1 py-0 text-[10px]"
+                          />
                         </span>
                       </div>
                       <div className="w-28 shrink-0">

@@ -14,8 +14,15 @@ import {
   emailSubmissionReturned,
   emailMention,
   emailSubtaskAssigned,
+  emailTaskRecurring,
 } from "@/lib/email";
 import { pushTaskAssigned, pushTaskCompleted, pushSubtaskAssigned } from "@/lib/push";
+import {
+  computeNextRun,
+  occurrenceDueFor,
+  describeRecurrence,
+  isRecurrenceFreq,
+} from "@/lib/recurrence";
 import { canManage, isOwner } from "@/lib/rbac";
 import {
   canReviewTask,
@@ -617,6 +624,137 @@ function sendAssignmentNotifications(actor, task, recipients) {
   return Promise.allSettled(tasks);
 }
 
+// ── Recurring tasks ────────────────────────────────────────────────
+// A recurring template spawns a fresh, independent occurrence each period. The
+// clone copies the "what" (title, description, priority, assignees) but resets
+// the "state" (fresh per-assignee status, new id/key, empty comments/subtasks/
+// files, its own activity log) and carries no recurrence rule of its own, so it
+// never spawns further tasks. It points back to the template via
+// `recurrenceParentId`.
+function cloneRecurringOccurrence(template) {
+  const ts = now();
+  const title = template.title;
+  const id = crypto.randomUUID();
+  const assignees = (template.assignees || []).map((a) =>
+    newAssignee({ id: a.id, name: a.name, role: a.role })
+  );
+  return {
+    id,
+    key: `${keyPrefix(title)}-${keyNum(id)}`,
+    title,
+    description: template.description,
+    priority: template.priority,
+    dueDate: occurrenceDueFor(template.nextRunAt),
+    recurrence: null,
+    recurrenceParentId: template.id,
+    nextRunAt: null,
+    cancelled: false,
+    cancelledAt: null,
+    subSeq: 0,
+    assignerId: template.assignerId,
+    assignerName: template.assignerName,
+    assignerRole: template.assignerRole,
+    assignees,
+    subtasks: [],
+    comments: [],
+    attachments: [],
+    activity: [
+      {
+        id: crypto.randomUUID(),
+        actorId: template.assignerId,
+        actorName: template.assignerName,
+        message: `created automatically from the recurring task "${title}"`,
+        createdAt: ts,
+      },
+    ],
+    createdAt: ts,
+    updatedAt: ts,
+  };
+}
+
+// Emails each assignee their daily task and pushes to their devices. Unlike a
+// one-off assignment (a single group-CC announcement to the assigner), a
+// recurring occurrence is a personal "do this today" reminder — so each
+// assignee is emailed directly. Best-effort; a failed send never blocks a spawn.
+async function sendRecurringNotifications(template, occ) {
+  const jobs = [];
+  for (const a of occ.assignees) {
+    const u = await store.findById(a.id);
+    if (u?.email) {
+      jobs.push(
+        emailTaskRecurring({
+          to: u.email,
+          assigneeName: a.name,
+          taskTitle: occ.title,
+          assignerName: template.assignerName,
+          taskId: occ.id,
+          freq: template.recurrence.freq,
+        })
+      );
+    }
+    jobs.push(
+      pushTaskAssigned({
+        userId: a.id,
+        taskTitle: occ.title,
+        assignerName: template.assignerName,
+        taskId: occ.id,
+      })
+    );
+  }
+  await Promise.allSettled(jobs);
+}
+
+/**
+ * Spawn one occurrence for every recurring template that's due, then advance its
+ * schedule. Idempotent within a run (nextRunAt moves past "now", so a second run
+ * the same day finds nothing) and self-healing across missed runs (it resumes
+ * with the current day rather than back-filling). Called by the daily cron —
+ * see /api/cron/recurring. Returns a small summary for the response/logs.
+ */
+export async function spawnDueRecurringTasks() {
+  await connectToDatabase();
+  const nowIso = now();
+  // ISO-8601 UTC strings sort chronologically, so a lexicographic `$lte` on the
+  // string is a correct "due" test.
+  const due = await Task.find({
+    "recurrence.active": true,
+    nextRunAt: { $ne: null, $lte: nowIso },
+  })
+    .select("id")
+    .lean();
+
+  let spawned = 0;
+  const errors = [];
+  for (const { id } of due) {
+    try {
+      // Reload through rawById so saveTask's optimistic-concurrency guard is
+      // armed — if someone edits the template mid-sweep, we retry next run.
+      const template = await rawById(id);
+      if (!template?.recurrence?.active || !template.nextRunAt) continue;
+      if (template.nextRunAt > nowIso) continue; // no longer due
+
+      // Build the occurrence from the *current* slot (its due date derives from
+      // the slot we're firing), then advance and save the template FIRST. That
+      // rev-guarded write claims the slot: a concurrent sweep — or a template
+      // edited mid-run — hits a 409 here and drops out, so the day's task can't
+      // be spawned twice. Only once the slot is safely claimed do we insert the
+      // occurrence and notify.
+      const occ = cloneRecurringOccurrence(template);
+      template.nextRunAt = computeNextRun(template.recurrence.freq, nowIso);
+      template.updatedAt = now();
+      await saveTask(template);
+
+      await saveTask(occ);
+      spawned++;
+      await sendRecurringNotifications(template, occ);
+    } catch (err) {
+      // One bad template must not abort the whole sweep.
+      errors.push({ id, error: err?.message || String(err) });
+    }
+  }
+  return { spawned, considered: due.length, errors };
+}
+
 export async function createTask(
   actor,
   input
@@ -635,13 +773,29 @@ export async function createTask(
   const title = input.title.trim();
   const id = crypto.randomUUID();
   const names = assignees.map((a) => a.name).join(", ");
+
+  // Recurrence only applies to an assigned task — a recurring draft has no one
+  // to remind. When on, this first task is the series template AND its first
+  // occurrence: it's due at the end of today and `nextRunAt` schedules the next.
+  const freq =
+    input.recurrence && isRecurrenceFreq(input.recurrence.freq) && assignees.length
+      ? input.recurrence.freq
+      : null;
+
   const task = {
     id,
     key: `${keyPrefix(title)}-${keyNum(id)}`,
     title,
     description: cleanHtml(input.description),
     priority: input.priority,
-    dueDate: input.dueDate ? new Date(input.dueDate).toISOString() : null,
+    dueDate: freq
+      ? occurrenceDueFor(ts)
+      : input.dueDate
+        ? new Date(input.dueDate).toISOString()
+        : null,
+    recurrence: freq ? { freq, active: true } : null,
+    recurrenceParentId: null,
+    nextRunAt: freq ? computeNextRun(freq, ts) : null,
     cancelled: false,
     cancelledAt: null,
     assignerId: actor.id,
@@ -654,9 +808,11 @@ export async function createTask(
     activity: [
       activity(
         actor,
-        assignees.length
-          ? `created this task and assigned it to ${names}`
-          : "created this task as a draft"
+        !assignees.length
+          ? "created this task as a draft"
+          : freq
+            ? `created a recurring task (${describeRecurrence({ freq })}) and assigned it to ${names}`
+            : `created this task and assigned it to ${names}`
       ),
     ],
     createdAt: ts,

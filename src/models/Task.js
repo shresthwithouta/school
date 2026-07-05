@@ -14,6 +14,14 @@ const TaskSchema = new Schema(
     description: { type: String, default: "" },
     priority: { type: String, required: true },
     dueDate: { type: String, default: null },
+    // Recurring tasks. On a *template* this holds `{ freq, active }` and
+    // `nextRunAt` is the next spawn instant; a daily job clones a fresh
+    // occurrence each period (see spawnDueRecurringTasks in lib/tasks). A spawned
+    // occurrence has no rule (`recurrence: null`) and points back via
+    // `recurrenceParentId`. Non-recurring tasks leave all three null.
+    recurrence: { type: Mixed, default: null },
+    recurrenceParentId: { type: String, default: null },
+    nextRunAt: { type: String, default: null },
     // A task with no assignees is a draft. Cancel/reopen toggle `cancelled`.
     cancelled: { type: Boolean, default: false },
     cancelledAt: { type: String, default: null },
@@ -41,6 +49,9 @@ TaskSchema.index({ assignerId: 1 });
 TaskSchema.index({ "assignees.id": 1 });
 TaskSchema.index({ "subtasks.assigneeId": 1 });
 TaskSchema.index({ key: 1 });
+// Backs the recurring-task sweep in spawnDueRecurringTasks: find active
+// templates whose next occurrence is due.
+TaskSchema.index({ "recurrence.active": 1, nextRunAt: 1 });
 
 const Task = models.Task || model("Task", TaskSchema);
 export default Task;
