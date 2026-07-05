@@ -5,54 +5,15 @@ import { toast } from "sonner";
 import { Bell, BellOff, Loader2, AlertTriangle } from "lucide-react";
 
 import { Switch } from "@/components/ui/switch";
-
-const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-
-// Push wants the VAPID public key as a byte array, not the base64url string.
-function urlBase64ToUint8Array(base64String) {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const raw = atob(base64);
-  const out = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
-  return out;
-}
-
-// Read current notification permission. Some app webviews don't expose
-// window.Notification even though push works, so fall back to the Permissions API.
-async function readPermission() {
-  if (typeof Notification !== "undefined" && Notification.permission) {
-    return Notification.permission;
-  }
-  try {
-    const status = await navigator.permissions?.query({ name: "notifications" });
-    if (status) return status.state === "prompt" ? "default" : status.state;
-  } catch {
-    // Permissions API not available / doesn't know "notifications".
-  }
-  return "default";
-}
-
-// Ask for permission. Prefer Notification.requestPermission when present; if it
-// isn't (some TWAs), let pushManager.subscribe() trigger the prompt instead.
-async function requestPermission() {
-  if (typeof Notification !== "undefined" && Notification.requestPermission) {
-    return Notification.requestPermission();
-  }
-  return "granted"; // optimistic — subscribe() will reject if it's actually blocked
-}
-
-async function postJSON(url, body) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || "Request failed");
-  }
-}
+import {
+  VAPID_PUBLIC_KEY,
+  pushSupported,
+  readPermission,
+  requestPermission,
+  subscribeThisDevice,
+  unsubscribeThisDevice,
+  getExistingSubscription,
+} from "@/lib/push-client";
 
 export function PushNotifications() {
   // "checking" → "unsupported" (no SW/Push) | "unconfigured" (no VAPID key) | "ready"
@@ -67,12 +28,8 @@ export function PushNotifications() {
     async function detect() {
       // Defer past the synchronous effect body so state is never set during render.
       await Promise.resolve();
-      const canPush =
-        typeof window !== "undefined" &&
-        "serviceWorker" in navigator &&
-        "PushManager" in window;
       if (cancelled) return;
-      if (!canPush) {
+      if (!pushSupported()) {
         setStatus("unsupported");
         return;
       }
@@ -83,8 +40,7 @@ export function PushNotifications() {
       setStatus("ready");
       setPermission(await readPermission());
       try {
-        const reg = await navigator.serviceWorker.ready;
-        const sub = await reg.pushManager.getSubscription();
+        const sub = await getExistingSubscription();
         if (!cancelled) setSubscribed(!!sub);
       } catch {
         // No registration yet (e.g. first load) — leave as not subscribed.
@@ -106,15 +62,7 @@ export function PushNotifications() {
         toast.error("Notifications are blocked. Enable them in your app settings.");
         return;
       }
-      const reg = await navigator.serviceWorker.ready;
-      let sub = await reg.pushManager.getSubscription();
-      if (!sub) {
-        sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-        });
-      }
-      await postJSON("/api/push/subscribe", { subscription: sub.toJSON(), welcome: true });
+      await subscribeThisDevice({ welcome: true });
       setSubscribed(true);
       setPermission(await readPermission());
       toast.success("Notifications enabled");
@@ -128,13 +76,7 @@ export function PushNotifications() {
   async function disable() {
     setBusy(true);
     try {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.getSubscription();
-      if (sub) {
-        const { endpoint } = sub;
-        await sub.unsubscribe();
-        await postJSON("/api/push/unsubscribe", { endpoint });
-      }
+      await unsubscribeThisDevice();
       setSubscribed(false);
       toast.success("Notifications turned off");
     } catch (err) {
