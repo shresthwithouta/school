@@ -55,6 +55,7 @@ import { StatusSelect } from "@/components/tasks/status-select";
 import { TaskDialog } from "@/components/tasks/task-dialog";
 import { SubtaskDialog } from "@/components/tasks/subtask-dialog";
 import { SubmitReviewDialog } from "@/components/tasks/submit-review-dialog";
+import { SendBackDialog } from "@/components/tasks/send-back-dialog";
 import { UserCombobox } from "@/components/tasks/user-combobox";
 import { CommentThread } from "@/components/tasks/comment-thread";
 import { RichText } from "@/components/rich-text";
@@ -750,41 +751,43 @@ export function TaskPageClient({ task, assignees, currentUser }) {
                         )}
                       </div>
                       {reviewable && (
-                        <div className="mt-2 flex gap-2 border-t pt-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="flex-1"
-                            disabled={!!busy}
-                            onClick={() =>
-                              api(
-                                `/api/tasks/${task.id}/transition`,
-                                "POST",
-                                { action: "approve", assigneeId: a.id },
-                                "review"
-                              )
-                            }
-                          >
-                            <Check className="size-4" />
-                            Approve
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="flex-1 text-amber-600 dark:text-amber-400"
-                            disabled={!!busy}
-                            onClick={() =>
-                              api(
-                                `/api/tasks/${task.id}/transition`,
-                                "POST",
-                                { action: "sendback", assigneeId: a.id },
-                                "review"
-                              )
-                            }
-                          >
-                            <Undo2 className="size-4" />
-                            Send back
-                          </Button>
+                        <div className="mt-2 space-y-2 border-t pt-2">
+                          <p className="text-xs text-muted-foreground">
+                            {a.name} submitted their work for review.
+                          </p>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              className="flex-1"
+                              disabled={!!busy}
+                              onClick={() =>
+                                api(
+                                  `/api/tasks/${task.id}/transition`,
+                                  "POST",
+                                  { action: "approve", assigneeId: a.id },
+                                  "review"
+                                )
+                              }
+                            >
+                              <Check className="size-4" />
+                              Approve
+                            </Button>
+                            <SendBackDialog
+                              taskId={task.id}
+                              assignee={a}
+                              trigger={
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="flex-1 text-amber-600 dark:text-amber-400"
+                                  disabled={!!busy}
+                                >
+                                  <Undo2 className="size-4" />
+                                  Send back
+                                </Button>
+                              }
+                            />
+                          </div>
                         </div>
                       )}
                     </li>

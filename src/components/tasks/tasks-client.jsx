@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Search,
@@ -35,7 +35,7 @@ import {
   RecurringBadge,
 } from "@/components/tasks/task-badges";
 import { TASK_PRIORITIES, PRIORITY_META } from "@/lib/task-meta";
-import { cn, formatDate, toPlainText } from "@/lib/utils";
+import { cn, formatDate, toPlainText, getInitials } from "@/lib/utils";
 
 const DAY_MS = 86_400_000;
 
@@ -91,17 +91,33 @@ function subtaskToRow(task, s) {
 }
 
 function AssigneeStack({ task }) {
-  const count = task.assignees.length;
+  const people = task.assignees || [];
+  const count = people.length;
   if (count === 0) {
-    return <span className="text-xs text-muted-foreground">—</span>;
+    return <span className="text-xs text-muted-foreground/50">—</span>;
   }
+  // Show up to two overlapping initials so you can see *who*, plus the total so
+  // you can see *how many* at a glance. Full roster is in the tooltip.
+  const shown = people.slice(0, 2);
   return (
     <span
-      className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
-      title={task.assignees.map((a) => a.name).join(", ")}
+      className="inline-flex items-center gap-1.5"
+      title={people.map((a) => a.name).join(", ")}
     >
-      <Users className="size-3.5" />
-      {count}
+      <span className="flex -space-x-1.5">
+        {shown.map((a) => (
+          <span
+            key={a.id}
+            className="inline-flex size-5 items-center justify-center rounded-full border border-background bg-primary/10 text-[9px] font-medium text-primary"
+          >
+            {getInitials(a.name)}
+          </span>
+        ))}
+      </span>
+      <span className="inline-flex items-center gap-0.5 text-xs font-medium text-muted-foreground tabular-nums">
+        <Users className="size-3" />
+        {count}
+      </span>
     </span>
   );
 }
@@ -180,6 +196,7 @@ const SCOPES = [
   { value: "all", label: "All" },
   { value: "mine", label: "My tasks" },
   { value: "created", label: "Created by me" },
+  { value: "approvals", label: "Approvals" },
   { value: "done-by-me", label: "Completed by me" },
   { value: "drafts", label: "Drafts" },
 ];
@@ -241,6 +258,25 @@ export function TasksClient({ tasks, currentUser }) {
     ? SCOPES.filter((s) => s.value !== "mine" && s.value !== "done-by-me")
     : SCOPES;
 
+  // Who reviews submissions: the task creator, or any manager (Owner/Admin).
+  // Mirrors canReview on the task detail page and canReviewTask server-side —
+  // so everything that shows up under "Approvals" is something the viewer can
+  // actually approve or send back once they open it.
+  const isManager = currentUser.tier === "OWNER" || currentUser.tier === "ADMIN";
+  const canReviewTask = useCallback(
+    (t) => t.assignerId === currentUser.id || isManager,
+    [currentUser.id, isManager]
+  );
+  // A submitted subtask is the viewer's to approve if they raised the subtask,
+  // created the parent task, or are a manager.
+  const canReviewSub = useCallback(
+    (t, s) =>
+      s.createdById === currentUser.id ||
+      t.assignerId === currentUser.id ||
+      isManager,
+    [currentUser.id, isManager]
+  );
+
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState("all");
   const [status, setStatus] = useState("all");
@@ -266,6 +302,23 @@ export function TasksClient({ tasks, currentUser }) {
     return c;
   }, [tasks]);
 
+  // How many submissions are waiting on THIS viewer to review — a submitted
+  // assignee on a task they can review, plus a submitted subtask they raised (or
+  // that sits on a task they created / manage). Drives the "Approvals" tab badge.
+  const approvalCount = useMemo(() => {
+    let n = 0;
+    for (const t of tasks) {
+      if (t.status === "cancelled") continue;
+      if (canReviewTask(t)) {
+        n += t.assignees.filter((a) => a.status === "submitted").length;
+      }
+      for (const s of t.subtasks || []) {
+        if (s.status === "submitted" && canReviewSub(t, s)) n += 1;
+      }
+    }
+    return n;
+  }, [tasks, canReviewTask, canReviewSub]);
+
   // Filtering runs against the deferred query so the input stays responsive on
   // big lists — React paints the keystroke first, then the heavier filter pass.
   const deferredQuery = useDeferredValue(query);
@@ -276,10 +329,13 @@ export function TasksClient({ tasks, currentUser }) {
   const searchIndex = useMemo(() => {
     const map = new Map();
     for (const t of tasks) {
+      // Parse the HTML description once, here — reused for both the search
+      // haystack and the row's display snippet so it never re-parses on render.
+      const descText = toPlainText(t.description);
       const taskHay = [
         t.key,
         t.title,
-        toPlainText(t.description),
+        descText,
         t.assignerName,
         ...t.assignees.map((a) => a.name),
       ]
@@ -292,7 +348,7 @@ export function TasksClient({ tasks, currentUser }) {
           .join(" ")
           .toLowerCase()
       );
-      map.set(t.id, { taskHay, subHays });
+      map.set(t.id, { taskHay, subHays, descSnippet: descText });
     }
     return map;
   }, [tasks]);
@@ -309,6 +365,11 @@ export function TasksClient({ tasks, currentUser }) {
       const mine = t.assignees.find((a) => a.id === currentUser.id);
       if (scope === "mine" && !mine) return false;
       if (scope === "created" && t.assignerId !== currentUser.id) return false;
+      if (
+        scope === "approvals" &&
+        !(canReviewTask(t) && t.assignees.some((a) => a.status === "submitted"))
+      )
+        return false;
       if (scope === "done-by-me" && !(mine && mine.status === "completed")) return false;
       if (scope === "drafts" && t.status !== "draft") return false;
       if (status === "active") {
@@ -324,6 +385,11 @@ export function TasksClient({ tasks, currentUser }) {
       const mine = s.assigneeId === currentUser.id;
       if (scope === "mine" && !mine) return false;
       if (scope === "created" && t.assignerId !== currentUser.id) return false;
+      if (
+        scope === "approvals" &&
+        !(s.status === "submitted" && canReviewSub(t, s))
+      )
+        return false;
       if (scope === "done-by-me" && !(mine && r.status === "completed")) return false;
       if (scope === "drafts") return false; // subtasks are never drafts
       if (status === "active") {
@@ -353,7 +419,19 @@ export function TasksClient({ tasks, currentUser }) {
       return base * factor;
     });
     return { list: out, autoExpand: auto };
-  }, [tasks, searchIndex, deferredQuery, scope, status, priority, sort, dir, currentUser.id]);
+  }, [
+    tasks,
+    searchIndex,
+    deferredQuery,
+    scope,
+    status,
+    priority,
+    sort,
+    dir,
+    currentUser.id,
+    canReviewTask,
+    canReviewSub,
+  ]);
 
   // Parents that actually have subtasks — drives the per-row expander and the
   // "Expand all" control.
@@ -423,6 +501,9 @@ export function TasksClient({ tasks, currentUser }) {
             {scopes.map((s) => (
               <SelectItem key={s.value} value={s.value}>
                 {s.label}
+                {s.value === "approvals" && approvalCount > 0
+                  ? ` (${approvalCount})`
+                  : ""}
               </SelectItem>
             ))}
           </SelectContent>
@@ -436,6 +517,11 @@ export function TasksClient({ tasks, currentUser }) {
                 className="cursor-pointer rounded-md px-3 py-1.5 hover:bg-background/60 data-active:shadow-sm"
               >
                 {s.label}
+                {s.value === "approvals" && approvalCount > 0 && (
+                  <span className="ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full bg-violet-500/15 px-1 text-[10px] font-semibold text-violet-700 tabular-nums dark:text-violet-400">
+                    {approvalCount}
+                  </span>
+                )}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -522,11 +608,15 @@ export function TasksClient({ tasks, currentUser }) {
           <div className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
             <Inbox className="size-6" />
           </div>
-          <h3 className="mt-3 font-medium">No tasks here</h3>
+          <h3 className="mt-3 font-medium">
+            {scope === "approvals" ? "Nothing to review" : "No tasks here"}
+          </h3>
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-            {tasks.length === 0
-              ? "Create your first task to get going."
-              : "Try a different filter or search."}
+            {scope === "approvals"
+              ? "When someone submits their work for review, it shows up here for you to approve or send back."
+              : tasks.length === 0
+                ? "Create your first task to get going."
+                : "Try a different filter or search."}
           </p>
         </div>
       ) : (
@@ -538,14 +628,16 @@ export function TasksClient({ tasks, currentUser }) {
               <span className="w-28 shrink-0">Status</span>
               <span className="w-24 shrink-0">Due</span>
               <span className="w-24 shrink-0">Priority</span>
-              <span className="w-20 shrink-0">Assignees</span>
+              <span className="w-20 shrink-0">People</span>
               <span className="w-20 shrink-0">Subtasks</span>
             </div>
             <ul className="divide-y">
               {list.map((t) => {
                 const subs = t.subtasks || [];
                 const hasSubs = subs.length > 0;
+                const doneSubs = subs.filter((s) => s.status === "done").length;
                 const open = hasSubs && (expanded.has(t.id) || autoExpand.has(t.id));
+                const desc = searchIndex.get(t.id)?.descSnippet || "";
                 return (
                   <li key={t.id} className={cn(open && "bg-muted/20")}>
                     {/* Parent row — the whole row navigates via the stretched
@@ -556,7 +648,7 @@ export function TasksClient({ tasks, currentUser }) {
                       </Link>
                       <div className="min-w-0 flex-1">
                         <span className="block truncate font-medium">{t.title}</span>
-                        <span className="mt-0.5 flex items-center gap-2">
+                        <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                           <span className="font-mono text-[11px] text-muted-foreground">
                             {t.key}
                           </span>
@@ -564,7 +656,17 @@ export function TasksClient({ tasks, currentUser }) {
                             recurrence={t.recurrence}
                             className="relative z-2 gap-0.5 px-1 py-0 text-[10px]"
                           />
+                          {t.assignerName && (
+                            <span className="text-[11px] text-muted-foreground">
+                              by {t.assignerName}
+                            </span>
+                          )}
                         </span>
+                        {desc && (
+                          <span className="mt-0.5 block truncate text-xs text-muted-foreground/80">
+                            {desc}
+                          </span>
+                        )}
                       </div>
                       <div className="w-28 shrink-0">
                         <StatusBadge status={t.status} />
@@ -604,10 +706,17 @@ export function TasksClient({ tasks, currentUser }) {
                             type="button"
                             onClick={() => toggleExpanded(t.id)}
                             aria-expanded={open}
-                            aria-label={open ? "Hide subtasks" : `Show ${subs.length} subtasks`}
+                            aria-label={
+                              open
+                                ? "Hide subtasks"
+                                : `Show ${subs.length} subtasks, ${doneSubs} done`
+                            }
+                            title={`${doneSubs} of ${subs.length} subtasks done`}
                             className="relative z-[2] inline-flex items-center gap-1 rounded-md border border-transparent px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-foreground"
                           >
-                            <span className="tabular-nums">{subs.length}</span>
+                            <span className="tabular-nums">
+                              {doneSubs}/{subs.length}
+                            </span>
                             <ChevronDown
                               className={cn(
                                 "size-3.5 transition-transform",
