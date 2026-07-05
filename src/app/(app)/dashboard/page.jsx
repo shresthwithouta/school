@@ -20,7 +20,6 @@ import { computeTaskStats, listVisibleTasks } from "@/lib/tasks";
 import { listVisibleMeetings, pendingDecisionsFromMeetings } from "@/lib/meetings";
 import { cn, formatDate, formatDateTime, getInitials } from "@/lib/utils";
 
-import { StatCard } from "@/components/stat-card";
 import { PendingDecisions } from "@/components/dashboard/pending-decisions";
 import { TierBadge } from "@/components/role-badge";
 import { StatusBadge, PriorityBadge } from "@/components/tasks/task-badges";
@@ -147,7 +146,7 @@ export default async function DashboardPage() {
           <CalendarDays className="size-4" />
           {formatDate(new Date())}
         </span>
-        <Button asChild>
+        <Button asChild className="w-full sm:w-auto">
           <Link href="/tasks/new">
             <Plus className="size-4" />
             New task
@@ -362,16 +361,11 @@ export default async function DashboardPage() {
     <div className="space-y-6">
       {header}
 
-      {/* Real task stats */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {/* Real task stats — compact 2×2 on phones, a single row on wide screens
+          (same layout as the Chairman view, so the dashboards stay symmetric). */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {kpis.map((k) => (
-          <StatCard
-            key={k.title}
-            title={k.title}
-            value={k.value}
-            icon={k.icon}
-            accent={k.accent}
-          />
+          <MiniStat key={k.title} {...k} />
         ))}
       </div>
 
@@ -413,7 +407,7 @@ export default async function DashboardPage() {
                     >
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-medium">{t.title}</p>
-                        <div className="mt-1 flex items-center gap-2">
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
                           {mine && <StatusBadge status={mine.status} />}
                           <PriorityBadge priority={t.priority} />
                         </div>
