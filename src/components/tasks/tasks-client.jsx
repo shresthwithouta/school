@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useDeferredValue, useMemo, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import {
   Search,
@@ -10,6 +16,8 @@ import {
   ArrowUp,
   ArrowDown,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CornerDownRight,
   ListTree,
   Users,
@@ -222,6 +230,11 @@ const STATUS_ORDER = {
   cancelled: 6,
 };
 
+// Top-level tasks shown per page. Paginating keeps the table a consistent
+// height however many tasks exist, so it reads like a real product rather than
+// an ever-growing wall of rows. Subtasks stay nested under their parent.
+const PAGE_SIZE = 10;
+
 // Returns a comparator for the chosen field in ascending order.
 // Tasks with no due date always sort to the end.
 function compareBy(field) {
@@ -287,6 +300,9 @@ export function TasksClient({ tasks, currentUser }) {
   // Subtasks stay tucked under their parent; this set holds the ids the user
   // has manually expanded. Filters can also auto-expand a parent (see below).
   const [expanded, setExpanded] = useState(() => new Set());
+  // Current page of the (filtered, sorted) task list. Reset to 1 whenever the
+  // filters change the result set (see the effect below).
+  const [page, setPage] = useState(1);
 
   // Live tallies per status, computed off the full board (tasks *and* their
   // subtasks) so the overview always reflects the true totals.
@@ -451,6 +467,34 @@ export function TasksClient({ tasks, currentUser }) {
     });
   const toggleAll = () =>
     setExpanded(allExpanded ? new Set() : new Set(parentsWithSubs));
+
+  // ── Pagination ─────────────────────────────────────────────────────
+  // Reset to page 1 whenever the filters/sort change the result set. This uses
+  // React's "adjust state during render" pattern rather than an effect, so there
+  // is no extra commit (and no cascading-render lint error). A background data
+  // refresh with the same filters keeps the user on their current page.
+  const filterSig = [deferredQuery, scope, status, priority, sort, dir].join(" ");
+  const [prevSig, setPrevSig] = useState(filterSig);
+  let currentPage = page;
+  if (prevSig !== filterSig) {
+    setPrevSig(filterSig);
+    setPage(1);
+    currentPage = 1;
+  }
+
+  const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  // Clamp so a shrinking result set never leaves us on a page that no longer exists.
+  const safePage = Math.min(currentPage, totalPages);
+  const pageStart = (safePage - 1) * PAGE_SIZE;
+  const pageItems = list.slice(pageStart, pageStart + PAGE_SIZE);
+
+  const listTopRef = useRef(null);
+  const goToPage = (p) => {
+    setPage(Math.min(Math.max(1, p), totalPages));
+    // Bring the top of the table back into view — helpful on long/expanded pages
+    // and on mobile where the pager sits well below the fold.
+    listTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
     <div className="space-y-4">
@@ -620,7 +664,8 @@ export function TasksClient({ tasks, currentUser }) {
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border bg-card">
+        <>
+        <div ref={listTopRef} className="overflow-x-auto rounded-xl border bg-card">
           <div className="min-w-[680px]">
             {/* Column header */}
             <div className="flex items-center gap-3 border-b bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground sm:px-4">
@@ -631,8 +676,10 @@ export function TasksClient({ tasks, currentUser }) {
               <span className="w-20 shrink-0">People</span>
               <span className="w-20 shrink-0">Subtasks</span>
             </div>
-            <ul className="divide-y">
-              {list.map((t) => {
+            {/* A steady minimum height keeps the panel the same size on short and
+                full pages, so it looks balanced rather than jumping around. */}
+            <ul className="min-h-88 divide-y">
+              {pageItems.map((t) => {
                 const subs = t.subtasks || [];
                 const hasSubs = subs.length > 0;
                 const doneSubs = subs.filter((s) => s.status === "done").length;
@@ -805,6 +852,48 @@ export function TasksClient({ tasks, currentUser }) {
             </ul>
           </div>
         </div>
+
+        {/* Pagination — steady controls so the page never grows unbounded. */}
+        <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
+          <p className="text-xs text-muted-foreground">
+            Showing{" "}
+            <span className="font-medium tabular-nums text-foreground">
+              {pageStart + 1}–{pageStart + pageItems.length}
+            </span>{" "}
+            of{" "}
+            <span className="font-medium tabular-nums text-foreground">
+              {list.length}
+            </span>{" "}
+            {list.length === 1 ? "task" : "tasks"}
+          </p>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={safePage <= 1}
+                onClick={() => goToPage(safePage - 1)}
+              >
+                <ChevronLeft className="size-4" />
+                Prev
+              </Button>
+              <span className="px-2 text-sm font-medium tabular-nums">
+                {safePage}
+                <span className="text-muted-foreground"> / {totalPages}</span>
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={safePage >= totalPages}
+                onClick={() => goToPage(safePage + 1)}
+              >
+                Next
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
+          )}
+        </div>
+        </>
       )}
     </div>
   );
