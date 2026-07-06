@@ -77,6 +77,8 @@ import {
   toPlainText,
 } from "@/lib/utils";
 
+const ACTIVITY_PAGE_SIZE = 6;
+
 export function TaskPageClient({ task, assignees, currentUser }) {
   const router = useRouter();
   const [busy, setBusy] = useState(null);
@@ -90,6 +92,9 @@ export function TaskPageClient({ task, assignees, currentUser }) {
   // Description is collapsible (toggled via the chevron) so a long write-up
   // doesn't push subtasks/comments below the fold.
   const [descOpen, setDescOpen] = useState(true);
+  // Activity log can grow long over a task's lifetime — collapsed to the
+  // most recent entries by default, expandable via "See all".
+  const [showAllActivity, setShowAllActivity] = useState(false);
 
   const mine = task.assignees.find((a) => a.id === currentUser.id) ?? null;
   const isManager = currentUser.tier === "OWNER" || currentUser.tier === "ADMIN";
@@ -840,20 +845,42 @@ export function TaskPageClient({ task, assignees, currentUser }) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <ol className="space-y-3 border-l pl-4">
-            {[...task.activity].reverse().map((a) => (
-              <li key={a.id} className="relative">
-                <span className="absolute -left-5.25 top-1.5 size-2 rounded-full bg-primary" />
-                <p className="text-sm">
-                  <span className="font-medium">{a.actorName}</span>{" "}
-                  <span className="text-muted-foreground">{a.message}</span>
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {formatDateTime(a.createdAt)}
-                </p>
-              </li>
-            ))}
-          </ol>
+          {(() => {
+            const allActivity = [...task.activity].reverse();
+            const visibleActivity = showAllActivity
+              ? allActivity
+              : allActivity.slice(0, ACTIVITY_PAGE_SIZE);
+            return (
+              <>
+                <ol className="space-y-3 border-l pl-4">
+                  {visibleActivity.map((a) => (
+                    <li key={a.id} className="relative">
+                      <span className="absolute -left-5.25 top-1.5 size-2 rounded-full bg-primary" />
+                      <p className="text-sm">
+                        <span className="font-medium">{a.actorName}</span>{" "}
+                        <span className="text-muted-foreground">{a.message}</span>
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatDateTime(a.createdAt)}
+                      </p>
+                    </li>
+                  ))}
+                </ol>
+                {allActivity.length > ACTIVITY_PAGE_SIZE && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-3 text-muted-foreground"
+                    onClick={() => setShowAllActivity((v) => !v)}
+                  >
+                    {showAllActivity
+                      ? "Show less"
+                      : `See all activity (${allActivity.length})`}
+                  </Button>
+                )}
+              </>
+            );
+          })()}
         </CardContent>
       </Card>
     </div>

@@ -31,6 +31,8 @@ const RecurringTaskSchema = new Schema(
     assignerRole: { type: String, default: "" },
     // Each assignee: { id, name, role }
     assignees: { type: [Mixed], default: [] },
+    // Reference files/voice notes attached at setup time (not a per-day entry).
+    attachments: { type: [Mixed], default: [] },
     // Each entry (one per assignee per due day):
     // { id, day:"YYYY-MM-DD", assigneeId, assigneeName, note, files:[...],
     //   createdAt, updatedAt }

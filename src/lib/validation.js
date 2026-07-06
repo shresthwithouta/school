@@ -182,6 +182,8 @@ export const createRecurringSchema = z.object({
   schedule: recurringSchedule,
   startDate: optionalDate,
   endDate: optionalDate,
+  // Reference files/voice notes attached while setting up the recurring task.
+  attachments: z.array(attachmentSchema).max(10).optional().default([]),
 });
 
 export const updateRecurringSchema = z.object({

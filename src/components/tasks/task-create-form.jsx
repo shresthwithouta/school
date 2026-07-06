@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, Paperclip, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { DateTimePicker } from "@/components/ui/date-time-picker";
 import { RichTextEditor } from "@/components/rich-text";
+import { AttachmentUploader } from "@/components/attachments";
 import { UserCombobox } from "@/components/tasks/user-combobox";
 import { TASK_PRIORITIES, PRIORITY_META } from "@/lib/task-meta";
 
@@ -29,6 +30,7 @@ export function TaskCreateForm({ assignees, currentUserId }) {
   const [selected, setSelected] = useState([]);
   const [priority, setPriority] = useState("medium");
   const [dueDate, setDueDate] = useState("");
+  const [attachments, setAttachments] = useState([]);
   const [saving, setSaving] = useState(false);
 
   const isDraft = selected.length === 0;
@@ -53,6 +55,7 @@ export function TaskCreateForm({ assignees, currentUserId }) {
         assigneeIds: selected,
         priority,
         dueDate,
+        attachments,
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -96,6 +99,38 @@ export function TaskCreateForm({ assignees, currentUserId }) {
               value={description}
               onChange={setDescription}
               placeholder="Add details, context or steps…"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>
+              Attachments{" "}
+              <span className="text-muted-foreground">(files or a voice note)</span>
+            </Label>
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {attachments.map((a, i) => (
+                  <span
+                    key={`${a.publicId}-${i}`}
+                    className="inline-flex items-center gap-1.5 rounded-full border bg-muted px-2 py-1 text-xs"
+                  >
+                    <Paperclip className="size-3" />
+                    <span className="max-w-40 truncate">{a.name}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAttachments((p) => p.filter((_, idx) => idx !== i))
+                      }
+                      className="text-muted-foreground hover:text-destructive"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <AttachmentUploader
+              onAdd={(a) => setAttachments((p) => [...p, a])}
             />
           </div>
         </div>

@@ -225,6 +225,15 @@ export function RecurringDetailClient({ recurring, assignees, currentUser }) {
             <RichText html={r.description} className="text-sm" />
           </div>
         )}
+
+        {r.attachments?.length > 0 && (
+          <div className="mt-4 rounded-lg border bg-muted/30 p-3">
+            <p className="mb-2 text-xs font-medium text-muted-foreground">
+              Reference files
+            </p>
+            <AttachmentList attachments={r.attachments} />
+          </div>
+        )}
       </div>
 
       {/* Today panel — only for assignees, when a result is due today */}

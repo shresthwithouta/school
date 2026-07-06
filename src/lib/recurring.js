@@ -71,6 +71,7 @@ function normalize(r) {
   if (!Array.isArray(r.assignees)) r.assignees = [];
   if (!Array.isArray(r.entries)) r.entries = [];
   if (!Array.isArray(r.activity)) r.activity = [];
+  if (!Array.isArray(r.attachments)) r.attachments = [];
   for (const e of r.entries) {
     if (!Array.isArray(e.files)) e.files = [];
   }
@@ -261,6 +262,7 @@ export async function createRecurring(actor, input) {
     assignerRole: actor.role,
     assignees,
     entries: [],
+    attachments: (input.attachments ?? []).map((a) => buildFile(actor, a)),
     activity: [
       activity(
         actor,
