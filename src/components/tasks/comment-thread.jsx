@@ -143,6 +143,8 @@ const CommentNode = memo(function CommentNode({ comment, depth, childrenOf, ctx 
     participants,
     currentUserId,
     isCreator,
+    onSaveAttachment,
+    savingAttachmentId,
   } = ctx;
   const replies = childrenOf.get(comment.id) ?? [];
   const isFeedback = comment.kind === "feedback";
@@ -201,7 +203,11 @@ const CommentNode = memo(function CommentNode({ comment, depth, childrenOf, ctx 
             <RichText html={comment.text} className="mt-1 text-muted-foreground" />
             {comment.attachments?.length > 0 && (
               <div className="mt-2">
-                <AttachmentList attachments={comment.attachments} />
+                <AttachmentList
+                  attachments={comment.attachments}
+                  onSave={onSaveAttachment}
+                  savingId={savingAttachmentId}
+                />
               </div>
             )}
           </div>
@@ -258,6 +264,8 @@ export function CommentThread({
   participants = [],
   currentUser,
   isCreator = false,
+  onSaveAttachment,
+  savingAttachmentId,
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(null);
@@ -328,8 +336,20 @@ export function CommentThread({
       participants,
       currentUserId,
       isCreator,
+      onSaveAttachment,
+      savingAttachmentId,
     }),
-    [replyTo, busy, post, nameOf, participants, currentUserId, isCreator]
+    [
+      replyTo,
+      busy,
+      post,
+      nameOf,
+      participants,
+      currentUserId,
+      isCreator,
+      onSaveAttachment,
+      savingAttachmentId,
+    ]
   );
 
   return (

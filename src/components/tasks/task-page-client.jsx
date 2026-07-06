@@ -562,6 +562,8 @@ export function TaskPageClient({ task, assignees, currentUser }) {
                 participants={participants}
                 currentUser={currentUser}
                 isCreator={canEdit}
+                onSaveAttachment={isChairman ? saveToRepo : undefined}
+                savingAttachmentId={savingId}
               />
             </CardContent>
           </Card>

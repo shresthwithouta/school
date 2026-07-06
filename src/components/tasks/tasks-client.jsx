@@ -24,6 +24,7 @@ import {
   Loader2,
   AlertTriangle,
   CheckCircle2,
+  ClipboardCheck,
   XCircle,
 } from "lucide-react";
 
@@ -132,10 +133,22 @@ function AssigneeStack({ task }) {
 
 // Live overview cards — each one filters the list when clicked.
 // "active" merges in-progress + assigned + in-review (tasks in the pipeline,
-// including those submitted and waiting on a reviewer).
+// including those submitted and waiting on a reviewer). "approvals" is a
+// scope filter rather than a status one — it drives the same `scope` state
+// as the Approvals tab below, so clicking either stays in sync.
 const STAT_CARDS = [
   {
+    key: "approvals",
+    kind: "scope",
+    label: "Pending approvals",
+    Icon: ClipboardCheck,
+    iconClass: "text-violet-600 dark:text-violet-400",
+    ring: "data-[active=true]:border-violet-500/50 data-[active=true]:bg-violet-500/10",
+    dot: "bg-violet-500",
+  },
+  {
     key: "active",
+    kind: "status",
     statuses: ["in_progress", "assigned", "in_review"],
     label: "Active",
     Icon: Loader2,
@@ -145,6 +158,7 @@ const STAT_CARDS = [
   },
   {
     key: "delayed",
+    kind: "status",
     statuses: ["delayed"],
     label: "Delayed",
     Icon: AlertTriangle,
@@ -154,6 +168,7 @@ const STAT_CARDS = [
   },
   {
     key: "completed",
+    kind: "status",
     statuses: ["completed"],
     label: "Completed",
     Icon: CheckCircle2,
@@ -163,6 +178,7 @@ const STAT_CARDS = [
   },
   {
     key: "cancelled",
+    kind: "status",
     statuses: ["cancelled"],
     label: "Cancelled",
     Icon: XCircle,
@@ -180,21 +196,19 @@ function StatCard({ card, count, active, onClick }) {
       data-active={active}
       onClick={onClick}
       className={cn(
-        "group flex items-center justify-between gap-2 rounded-lg border bg-card px-2.5 py-1.5 text-left transition-all hover:bg-accent/60 hover:shadow-sm",
-        "sm:flex-col sm:items-start sm:gap-2 sm:rounded-xl sm:p-4",
+        "group flex flex-col gap-1 rounded-lg border bg-card px-2 py-1.5 text-left transition-all hover:bg-accent/60 hover:shadow-sm sm:gap-1.5 sm:rounded-xl sm:p-3",
         ring
       )}
     >
-      {/* Mobile: number + label sit on one compact row. Desktop: stacked. */}
-      <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-muted-foreground sm:text-xs sm:order-1">
+      <span className="flex items-center justify-between gap-1">
         <span className={cn("size-1.5 shrink-0 rounded-full", dot)} />
-        <span className="truncate">{label}</span>
+        <Icon className={cn("size-3.5 shrink-0", iconClass)} />
       </span>
-      <span className="ml-auto flex shrink-0 items-center gap-1.5 sm:ml-0 sm:gap-2 sm:order-2 sm:w-full sm:justify-between">
-        <span className="text-base font-semibold leading-none tabular-nums sm:text-2xl">
-          {count}
-        </span>
-        <Icon className={cn("size-3.5 shrink-0 sm:size-4", iconClass)} />
+      <span className="text-base font-semibold leading-none tabular-nums sm:text-xl">
+        {count}
+      </span>
+      <span className="truncate text-[10px] font-medium text-muted-foreground sm:text-xs">
+        {label}
       </span>
     </button>
   );
@@ -521,18 +535,30 @@ export function TasksClient({ tasks, currentUser, initialStatus = "all" }) {
             Live
           </span>
         </div>
-        <div className="relative grid grid-cols-2 gap-1.5 sm:grid-cols-4 sm:gap-2">
-          {STAT_CARDS.map((card) => (
-            <StatCard
-              key={card.key}
-              card={card}
-              count={card.statuses.reduce((n, s) => n + (counts[s] || 0), 0)}
-              active={status === card.key}
-              onClick={() =>
-                setStatus((s) => (s === card.key ? "all" : card.key))
-              }
-            />
-          ))}
+        <div className="relative grid grid-cols-5 gap-1 sm:gap-2">
+          {STAT_CARDS.map((card) =>
+            card.kind === "scope" ? (
+              <StatCard
+                key={card.key}
+                card={card}
+                count={approvalCount}
+                active={scope === card.key}
+                onClick={() =>
+                  setScope((s) => (s === card.key ? "all" : card.key))
+                }
+              />
+            ) : (
+              <StatCard
+                key={card.key}
+                card={card}
+                count={card.statuses.reduce((n, s) => n + (counts[s] || 0), 0)}
+                active={status === card.key}
+                onClick={() =>
+                  setStatus((s) => (s === card.key ? "all" : card.key))
+                }
+              />
+            )
+          )}
         </div>
       </div>
 
