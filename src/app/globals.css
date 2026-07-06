@@ -132,6 +132,19 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html,
+  body {
+    /* The app sidebar is position:fixed to the viewport, not the document, so
+       it never scrolls with the page. If any content ever overflows wide
+       enough to make the document itself scroll horizontally, the fixed
+       sidebar stays put while everything else shifts under it — the page
+       looks "broken" with content sliced off behind the sidebar. Clipping
+       horizontal overflow at the root means an overflowing element just gets
+       cut off in place instead of dragging the whole page sideways.
+       Intentional horizontal scrollers (e.g. the tasks table) still scroll
+       fine since that's a separate overflow-x-auto container. */
+    overflow-x: hidden;
+  }
   body {
     @apply bg-background text-foreground;
   }
