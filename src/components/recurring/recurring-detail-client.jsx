@@ -74,7 +74,7 @@ import {
   formatDayKey,
 } from "@/lib/recurring-schedule";
 import { canManage, canManageTarget, isOwner } from "@/lib/rbac";
-import { cn, getInitials, formatDateTime } from "@/lib/utils";
+import { getInitials, formatDateTime } from "@/lib/utils";
 
 const ACTIVITY_PAGE_SIZE = 6;
 
@@ -119,6 +119,7 @@ export function RecurringDetailClient({ recurring, assignees, currentUser }) {
   const [r, setR] = useState(recurring);
   const [busy, setBusy] = useState(false);
   const [showAllActivity, setShowAllActivity] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const today = todayDayKey();
   const startKey = dayKeyOf(r.startDate) || today;
@@ -147,6 +148,25 @@ export function RecurringDetailClient({ recurring, assignees, currentUser }) {
 
   const myEntryToday = entryMap.get(`${currentUser.id}::${today}`);
   const [viewEntry, setViewEntry] = useState(null);
+  const [deletingEntryId, setDeletingEntryId] = useState(null);
+
+  async function removeEntry(entry) {
+    setDeletingEntryId(entry.id);
+    const res = await fetch(`/api/recurring/${r.id}/entries`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entryId: entry.id }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setDeletingEntryId(null);
+    if (!res.ok) {
+      toast.error(data.error ?? "Could not remove this response");
+      return;
+    }
+    setR(data.recurring);
+    toast.success("Response removed");
+    router.refresh();
+  }
 
   async function patch(body, okMsg) {
     setBusy(true);
@@ -252,99 +272,167 @@ export function RecurringDetailClient({ recurring, assignees, currentUser }) {
         />
       )}
 
-      {/* Log grid */}
+      {/* Daily log summary — today's status per person, with a link out to full history */}
       <Card>
         <CardContent className="space-y-3">
-          <div className="flex items-center gap-2">
-            <History className="size-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">Daily log</h2>
-            <span className="text-xs text-muted-foreground">
-              {rows.length === 1 && rows[0].id === currentUser.id
-                ? "your uploads"
-                : `${rows.length} ${rows.length === 1 ? "person" : "people"}`}
-            </span>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <History className="size-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold">Daily log</h2>
+              <span className="text-xs text-muted-foreground">
+                {rows.length === 1 && rows[0].id === currentUser.id
+                  ? "your uploads"
+                  : `${rows.length} ${rows.length === 1 ? "person" : "people"}`}
+              </span>
+            </div>
+            {days.length > 0 && (
+              <Button variant="outline" size="sm" onClick={() => setHistoryOpen(true)}>
+                See all responses
+              </Button>
+            )}
           </div>
 
-          {days.length === 0 ? (
+          {rows.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No one to show yet.
+            </p>
+          ) : days.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
               No scheduled days yet.
             </p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full border-separate border-spacing-0 text-sm">
-                <thead>
-                  <tr>
-                    <th className="sticky left-0 z-10 bg-card px-2 py-2 text-left text-xs font-medium text-muted-foreground">
-                      Person
-                    </th>
-                    {days.map((d) => (
-                      <th
-                        key={d}
-                        className={cn(
-                          "whitespace-nowrap px-2 py-2 text-center text-[11px] font-medium",
-                          d === today ? "text-primary" : "text-muted-foreground"
-                        )}
+            <ul className="divide-y">
+              {rows.map((a) => {
+                const e = entryMap.get(`${a.id}::${today}`);
+                return (
+                  <li key={a.id} className="flex items-center gap-3 py-2.5">
+                    <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
+                      {getInitials(a.name)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">
+                        {a.name}
+                        {a.id === currentUser.id ? " (you)" : ""}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Today · {formatDayKey(today)}
+                      </p>
+                    </div>
+                    {e ? (
+                      <button
+                        type="button"
+                        onClick={() => setViewEntry(e)}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-500/25 dark:text-emerald-400"
                       >
-                        {formatDayKey(d)}
-                        {d === today && <span className="block text-[9px]">Today</span>}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((a) => (
-                    <tr key={a.id}>
-                      <td className="sticky left-0 z-10 border-t bg-card px-2 py-2">
-                        <span className="inline-flex items-center gap-2">
-                          <span className="inline-flex size-6 items-center justify-center rounded-full bg-primary/10 text-[10px] font-medium text-primary">
-                            {getInitials(a.name)}
-                          </span>
-                          <span className="whitespace-nowrap text-xs font-medium">
-                            {a.name}
-                            {a.id === currentUser.id ? " (you)" : ""}
-                          </span>
-                        </span>
-                      </td>
-                      {days.map((d) => {
-                        const e = entryMap.get(`${a.id}::${d}`);
-                        const past = d < today;
-                        return (
-                          <td key={d} className="border-t px-2 py-2 text-center">
-                            {e ? (
-                              <button
-                                type="button"
-                                onClick={() => setViewEntry(e)}
-                                title={`View ${a.name}'s result for ${formatDayKey(d)}`}
-                                className="inline-flex size-6 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600 transition-colors hover:bg-emerald-500/25 dark:text-emerald-400"
-                              >
-                                <Check className="size-3.5" />
-                              </button>
-                            ) : past ? (
-                              <span
-                                title="Missed"
-                                className="inline-flex size-6 items-center justify-center rounded-full bg-rose-500/10 text-rose-500"
-                              >
-                                <span className="size-1.5 rounded-full bg-current" />
-                              </span>
-                            ) : (
-                              <span
-                                title="Awaiting"
-                                className="inline-flex size-6 items-center justify-center rounded-full bg-muted text-muted-foreground/50"
-                              >
-                                <Clock className="size-3" />
-                              </span>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                        <Check className="size-3.5" /> Uploaded
+                      </button>
+                    ) : dueToday ? (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
+                        <Clock className="size-3.5" /> Awaiting
+                      </span>
+                    ) : (
+                      <span className="shrink-0 text-xs text-muted-foreground">Not due today</span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </CardContent>
       </Card>
+
+      {/* Full history — every scheduled day, in a scrollable window instead of a wide grid */}
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>All responses</DialogTitle>
+            <DialogDescription>Every scheduled day, most recent first</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {days.map((d) => (
+              <div key={d}>
+                <div className="mb-1.5 flex items-center gap-2">
+                  <p className="text-sm font-semibold">{formatDayKey(d)}</p>
+                  {d === today && (
+                    <Badge variant="outline" className="text-[10px]">
+                      Today
+                    </Badge>
+                  )}
+                </div>
+                <ul className="divide-y rounded-lg border">
+                  {rows.map((a) => {
+                    const e = entryMap.get(`${a.id}::${d}`);
+                    const past = d < today;
+                    const canDelete = e && r.canEdit;
+                    return (
+                      <li key={a.id} className="flex items-center gap-3 px-3 py-2">
+                        <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-medium text-primary">
+                          {getInitials(a.name)}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                          {a.name}
+                          {a.id === currentUser.id ? " (you)" : ""}
+                        </span>
+                        {e ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setViewEntry(e);
+                                setHistoryOpen(false);
+                              }}
+                              className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-600 transition-colors hover:bg-emerald-500/25 dark:text-emerald-400"
+                            >
+                              <Check className="size-3" /> View
+                            </button>
+                            {canDelete && (
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <button
+                                    type="button"
+                                    title="Delete this response"
+                                    disabled={deletingEntryId === e.id}
+                                    className="inline-flex items-center justify-center rounded-full p-1 text-muted-foreground transition-colors hover:bg-rose-500/10 hover:text-rose-600 disabled:opacity-50 dark:hover:text-rose-400"
+                                  >
+                                    {deletingEntryId === e.id ? (
+                                      <Loader2 className="size-3.5 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="size-3.5" />
+                                    )}
+                                  </button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Delete this response?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      Removes {a.name}&apos;s result for {formatDayKey(d)},
+                                      including any attached files. This can&apos;t be undone.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction onClick={() => removeEntry(e)}>
+                                      Delete
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            )}
+                          </>
+                        ) : past ? (
+                          <span className="text-[11px] text-rose-500">Missed</span>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground">Awaiting</span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Activity */}
       {r.activity?.length > 0 && (

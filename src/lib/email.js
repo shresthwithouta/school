@@ -133,6 +133,19 @@ export async function emailMeetingInviteGroup(args) {
   });
 }
 
+/** To an attendee: the meeting is about to start. */
+export async function emailMeetingReminder(args) {
+  await sendEmail({
+    to: args.to,
+    subject: `Starting soon: ${args.title}`,
+    html: layout(
+      "Your meeting is starting soon ⏳",
+      `Hi ${esc(args.attendeeName)}, <strong>${esc(args.title)}</strong> starts in about ${esc(args.startsInLabel)}.${meetingDetails(args)}`,
+      { label: "Open meeting", href: meetingUrl(args.meetingId) }
+    ),
+  });
+}
+
 export async function emailTaskAssigned(args) {
   await sendEmail({
     to: args.to,
@@ -239,6 +252,32 @@ export async function emailTaskDelayed(args) {
 }
 
 /** To a subtask's assignee: it passed its expected date and is now overdue. */
+/** To an assignee: their task's due date is coming up and it isn't submitted yet. */
+export async function emailTaskDueSoon(args) {
+  await sendEmail({
+    to: args.to,
+    subject: `Due soon: ${args.taskTitle}`,
+    html: layout(
+      "Your task is due soon ⏳",
+      `Hi ${esc(args.assigneeName)}, the task <strong>${esc(args.taskTitle)}</strong> is due in about ${esc(args.dueInLabel)} and hasn't been submitted yet. Open it to finish up before it's overdue.`,
+      { label: "Open task", href: taskUrl(args.taskId) }
+    ),
+  });
+}
+
+/** To a subtask's assignee: its expected date is coming up and it isn't submitted yet. */
+export async function emailSubtaskDueSoon(args) {
+  await sendEmail({
+    to: args.to,
+    subject: `Due soon: ${args.subtaskTitle}`,
+    html: layout(
+      "Your subtask is due soon ⏳",
+      `Hi ${esc(args.assigneeName)}, the subtask <strong>${esc(args.subtaskTitle)}</strong> under <strong>${esc(args.taskTitle)}</strong> is due in about ${esc(args.dueInLabel)} and hasn't been submitted yet. Open it to finish up before it's overdue.`,
+      { label: "Open subtask", href: subtaskUrl(args.taskId, args.subtaskKey) }
+    ),
+  });
+}
+
 export async function emailSubtaskDelayed(args) {
   await sendEmail({
     to: args.to,

@@ -64,17 +64,19 @@ function MiniStat({ title, value, icon: Icon, accent, href }) {
     <>
       <div
         className={cn(
-          "flex size-9 shrink-0 items-center justify-center rounded-lg",
+          "flex size-6 shrink-0 items-center justify-center rounded-md sm:size-7",
           MINI_ACCENTS[accent]
         )}
       >
-        <Icon className="size-4" />
+        <Icon className="size-3.5" />
       </div>
       <div className="min-w-0">
-        <p className="text-2xl font-semibold leading-none tracking-tight">
+        <p className="text-base font-semibold leading-none tracking-tight sm:text-lg">
           {value}
         </p>
-        <p className="mt-1 truncate text-xs text-muted-foreground">{title}</p>
+        <p className="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground">
+          {title}
+        </p>
       </div>
     </>
   );
@@ -82,14 +84,14 @@ function MiniStat({ title, value, icon: Icon, accent, href }) {
     return (
       <Link
         href={href}
-        className="flex items-center gap-3 rounded-xl border bg-card p-3 transition-colors hover:bg-accent/40"
+        className="flex items-center gap-2 rounded-lg border bg-card p-2 transition-colors hover:bg-accent/40 sm:p-2.5"
       >
         {inner}
       </Link>
     );
   }
   return (
-    <div className="flex items-center gap-3 rounded-xl border bg-card p-3">
+    <div className="flex items-center gap-2 rounded-lg border bg-card p-2 sm:p-2.5">
       {inner}
     </div>
   );
@@ -266,7 +268,7 @@ export default async function DashboardPage() {
   );
 
   const kpiRow = (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+    <div className="grid grid-cols-5 gap-2 sm:gap-3">
       {kpis.map((k) => (
         <MiniStat key={k.title} {...k} />
       ))}

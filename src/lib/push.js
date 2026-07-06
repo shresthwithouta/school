@@ -155,6 +155,40 @@ export async function pushSubtaskDelayed({
   });
 }
 
+export async function pushTaskDueSoon({ userId, taskTitle, taskId, dueInLabel }) {
+  await sendPushToUser(userId, {
+    title: "Task due soon ⏳",
+    body: `"${taskTitle}" is due in about ${dueInLabel}.`,
+    url: `/tasks/${taskId}`,
+    tag: `task-${taskId}-due-soon`,
+  });
+}
+
+export async function pushSubtaskDueSoon({
+  userId,
+  subtaskTitle,
+  taskTitle,
+  taskId,
+  subtaskKey,
+  dueInLabel,
+}) {
+  await sendPushToUser(userId, {
+    title: "Subtask due soon ⏳",
+    body: `"${subtaskTitle}" in ${taskTitle} is due in about ${dueInLabel}.`,
+    url: `/tasks/${taskId}/${subtaskKey}`,
+    tag: `subtask-${taskId}-${subtaskKey}-due-soon`,
+  });
+}
+
+export async function pushMeetingReminder({ userId, title, meetingId, startsInLabel }) {
+  await sendPushToUser(userId, {
+    title: "Meeting starting soon ⏳",
+    body: `"${title}" starts in about ${startsInLabel}.`,
+    url: `/meetings/${meetingId}`,
+    tag: `meeting-${meetingId}-reminder`,
+  });
+}
+
 export async function pushTaskCompleted({ userId, taskTitle, byName, taskId }) {
   await sendPushToUser(userId, {
     title: "Task completed ✅",

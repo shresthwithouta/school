@@ -158,6 +158,88 @@ export function SubtaskPageClient({
         )}
       </div>
 
+      {/* Mobile-only quick actions: status + workflow buttons, surfaced right
+          under the header so they're not buried below the fold behind the
+          title/description on small screens. Mirrors the "Status" block in
+          the sidebar Details card (hidden on mobile there to avoid duplication). */}
+      <div className="space-y-1.5 rounded-lg border p-3 lg:hidden">
+        <Label className="text-xs text-muted-foreground">Status</Label>
+        <div>
+          <Badge
+            variant="outline"
+            className={SUBTASK_STATUS_META[sub.status].badgeClass}
+          >
+            {SUBTASK_STATUS_META[sub.status].label}
+          </Badge>
+        </div>
+        <div className="flex flex-wrap gap-2 pt-1">
+          {isAssignee && sub.status === "todo" && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => patch({ status: "in_progress" }, "Started")}
+            >
+              <Play className="size-4" />
+              Start
+            </Button>
+          )}
+          {isAssignee &&
+            (sub.status === "todo" || sub.status === "in_progress") && (
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() =>
+                  patch({ status: "submitted" }, "Submitted for review")
+                }
+              >
+                <Send className="size-4" />
+                Submit for review
+              </Button>
+            )}
+          {canReview && sub.status === "submitted" && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => patch({ status: "done" }, "Approved")}
+              >
+                <Check className="size-4" />
+                Approve
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-amber-600 dark:text-amber-400"
+                disabled={busy}
+                onClick={() => patch({ status: "in_progress" }, "Sent back")}
+              >
+                <Undo2 className="size-4" />
+                Send back
+              </Button>
+            </>
+          )}
+          {canReview && sub.status === "done" && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => patch({ status: "in_progress" }, "Reopened")}
+            >
+              <Undo2 className="size-4" />
+              Reopen
+            </Button>
+          )}
+        </div>
+        {sub.status === "submitted" && (
+          <p className="inline-flex items-center gap-1.5 text-xs text-violet-600 dark:text-violet-400">
+            <Lock className="size-3.5" />
+            Awaiting the creator&apos;s approval.
+          </p>
+        )}
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Main */}
         <Card className="lg:col-span-2">
@@ -235,7 +317,7 @@ export function SubtaskPageClient({
               </Link>
             </div>
 
-            <div className="space-y-1.5">
+            <div className="hidden space-y-1.5 lg:block">
               <Label className="text-xs text-muted-foreground">Status</Label>
               <div>
                 <Badge

@@ -17,7 +17,7 @@ export default async function AppLayout({
       <AppSidebar user={user} />
       <SidebarInset>
         <AppHeader user={user} />
-        <main className="flex-1 p-4 pb-24 sm:p-6 md:pb-6 lg:p-8">{children}</main>
+        <main className="min-w-0 flex-1 p-4 pb-24 sm:p-6 md:pb-6 lg:p-8">{children}</main>
         <MobileTabs role={user.role} />
         <PushAutoPrompt />
       </SidebarInset>

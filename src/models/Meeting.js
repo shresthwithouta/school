@@ -26,6 +26,9 @@ const MeetingSchema = new Schema(
     status: { type: String, default: "scheduled" }, // scheduled | completed
     summary: { type: String, default: "" },
     maxAttendees: { type: Number, default: null },
+    // Set once the "starting soon" reminder has fired (see sendMeetingReminders);
+    // cleared when the schedule moves so a new time can trigger a fresh one.
+    reminderSent: { type: Boolean, default: false },
     createdAt: { type: String, required: true },
     updatedAt: { type: String, required: true },
   },

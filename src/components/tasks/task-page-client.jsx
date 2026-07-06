@@ -226,7 +226,7 @@ export function TaskPageClient({ task, assignees, currentUser }) {
   ].filter((p, i, arr) => p.id && arr.findIndex((x) => x.id === p.id) === i);
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <Button asChild variant="ghost" size="sm" className="-ml-2 w-fit">
         <Link href="/tasks">
           <ArrowLeft className="size-4" />
@@ -301,9 +301,45 @@ export function TaskPageClient({ task, assignees, currentUser }) {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      {/* Mobile-only quick actions: status switcher + submit for review,
+          surfaced right under the header so they're not buried below the
+          fold behind description/subtasks/comments on small screens. Mirrors
+          the "Status" block in the sidebar Details card (hidden on mobile
+          there to avoid duplication). */}
+      <div className="rounded-lg border p-3 lg:hidden">
+        <p className="mb-1.5 text-xs text-muted-foreground">Status</p>
+        {statusOptions.length > 0 ? (
+          <StatusSelect
+            status={task.status}
+            options={statusOptions}
+            busy={statusBusy}
+            onSelect={changeStatus}
+          />
+        ) : (
+          <StatusBadge status={task.status} />
+        )}
+        {canSubmit && (
+          <SubmitReviewDialog
+            taskId={task.id}
+            trigger={
+              <Button size="sm" className="mt-2 w-full">
+                <Send className="size-4" />
+                Submit for review
+              </Button>
+            }
+          />
+        )}
+        {mine && mine.status === "submitted" && (
+          <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-violet-600 dark:text-violet-400">
+            <Lock className="size-3.5" />
+            Submitted — awaiting review
+          </p>
+        )}
+      </div>
+
+      <div className="grid min-w-0 gap-6 lg:grid-cols-3">
         {/* Main column */}
-        <div className="space-y-6 lg:col-span-2">
+        <div className="min-w-0 space-y-6 lg:col-span-2">
           {/* Description — collapsible so a long write-up doesn't bury the
               subtasks/comments below it. Any general reference files added
               while creating/editing the task show here, read-only. */}
@@ -676,7 +712,7 @@ export function TaskPageClient({ task, assignees, currentUser }) {
               <CardTitle className="text-base">Details</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <div>
+              <div className="hidden lg:block">
                 <p className="mb-1.5 text-xs text-muted-foreground">Status</p>
                 {statusOptions.length > 0 ? (
                   <StatusSelect

@@ -21,6 +21,8 @@ import {
   emailTaskRecurring,
   emailTaskDelayed,
   emailSubtaskDelayed,
+  emailTaskDueSoon,
+  emailSubtaskDueSoon,
 } from "@/lib/email";
 import {
   pushTaskAssigned,
@@ -34,6 +36,8 @@ import {
   pushSubtaskReturned,
   pushTaskDelayed,
   pushSubtaskDelayed,
+  pushTaskDueSoon,
+  pushSubtaskDueSoon,
 } from "@/lib/push";
 import {
   computeNextRun,
@@ -79,6 +83,10 @@ function taskKey(t) {
 }
 
 const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
+// How far ahead of a deadline the "due soon" reminder fires (see
+// sendUpcomingDueReminders).
+const DUE_SOON_WINDOW_MS = HOUR_MS;
 
 // Version token captured at load time for optimistic concurrency. Stored as a
 // non-enumerable Symbol so it never serializes into the DB doc or a DTO.
@@ -598,20 +606,22 @@ export async function getTaskAnalytics(actor) {
 }
 
 // ── Mutations ──────────────────────────────────────────────────────
-// Full-oversight recipients (Chairman/Director tier) for task/subtask review
-// events — the "director and all" audience beyond the direct assigner/assignee,
-// so leadership sees every submit/return/complete without being on the task.
+// Full-oversight recipients (every manager — Owner + Admin tier) for task/
+// subtask review events — the "management" audience beyond the direct
+// assigner/assignee, so every manager sees a submit/return/complete even when
+// they're not on the task themselves.
 // `exclude` is a set of ids already being notified separately (avoids duplicates).
 async function oversightRecipients(exclude) {
   const users = await store.list();
-  return users.filter((u) => isOwner(u.role) && !exclude.has(u.id));
+  return users.filter((u) => canManage(u.role) && !exclude.has(u.id));
 }
 
 // Assignment notifications. One person → a personalized email. Multiple people
 // at once → a single email addressed to the assigner with everyone in CC, so the
 // whole group can see who else is on the task (instead of N isolated emails).
 // Each assignee also gets a web-push notification (best-effort — no-ops without
-// VAPID). `recipients` is [{ id, email, name }] and excludes the assigner.
+// VAPID). `recipients` is [{ id, email, name }], including the assigner if they
+// assigned themselves.
 function sendAssignmentNotifications(actor, task, recipients) {
   const valid = recipients.filter((r) => r.email || r.id);
   if (valid.length === 0) return Promise.resolve();
@@ -837,10 +847,13 @@ export async function createTask(
 
   await saveTask(task);
 
-  // Notify assignees (best-effort, after the response is sent — never blocks the save).
-  const recipients = assignees
-    .filter((a) => a.id !== actor.id)
-    .map((a) => ({ id: a.id, email: allowed.get(a.id)?.email, name: a.name }));
+  // Notify assignees, including the actor if they assigned themselves
+  // (best-effort, after the response is sent — never blocks the save).
+  const recipients = assignees.map((a) => ({
+    id: a.id,
+    email: allowed.get(a.id)?.email,
+    name: a.name,
+  }));
   if (recipients.length) {
     after(() => sendAssignmentNotifications(actor, task, recipients));
   }
@@ -878,6 +891,8 @@ export async function updateTask(
         )
       );
       task.dueDate = next;
+      // A moved deadline should be able to trigger a fresh "due soon" reminder.
+      for (const a of task.assignees) a.dueSoonNotified = false;
     }
   }
   const addedEmails = [];
@@ -891,7 +906,7 @@ export async function updateTask(
       const cur = existing.get(cid);
       if (cur) return cur;
       const u = allowed.get(cid);
-      if (u.id !== actor.id) addedEmails.push({ id: u.id, email: u.email, name: u.name });
+      addedEmails.push({ id: u.id, email: u.email, name: u.name });
       return newAssignee({ id: u.id, name: u.name, role: u.role });
     });
     task.activity.push(
@@ -1113,8 +1128,9 @@ export async function addSubtask(
   task.updatedAt = now();
   await saveTask(task);
 
-  // Notify the assignee (best-effort, after the response — never blocks the save).
-  if (assigneeUser && assigneeUser.id !== actor.id) {
+  // Notify the assignee, including the actor if they assigned themselves
+  // (best-effort, after the response — never blocks the save).
+  if (assigneeUser) {
     after(() =>
       Promise.allSettled([
         emailSubtaskAssigned({
@@ -1235,6 +1251,8 @@ export async function updateSubtask(
       sub.expectedDate = input.expectedDate
         ? new Date(input.expectedDate).toISOString()
         : null;
+      // A moved deadline should be able to trigger a fresh "due soon" reminder.
+      sub.dueSoonNotified = false;
     }
     if (input.assigneeId !== undefined) {
       if (input.assigneeId === "") {
@@ -1245,7 +1263,7 @@ export async function updateSubtask(
         const u = assignable.find((x) => x.id === input.assigneeId);
         if (!u) throw new AppError("You cannot assign to that person.", 403);
         // Only notify when this is a genuinely new assignee (not a no-op re-save).
-        if (sub.assigneeId !== u.id && u.id !== actor.id) notifyUser = u;
+        if (sub.assigneeId !== u.id) notifyUser = u;
         sub.assigneeId = u.id;
         sub.assigneeName = u.name;
       }
@@ -1768,4 +1786,127 @@ export async function sendDelayedTaskReminders() {
     }
   }
   return { reminded, considered: docs.length + withSubtasks.length, errors };
+}
+
+/** "38 minutes" / "1 hour" — the time-left label used in due-soon notifications. */
+function formatDueIn(msLeft) {
+  const mins = Math.max(1, Math.round(msLeft / 60_000));
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"}`;
+  const hours = Math.round(mins / 60);
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
+}
+
+// ── Upcoming-deadline reminders ───────────────────────────────────────
+// Frequent sweep (see /api/cron/reminders): emails + pushes every open
+// assignee on a task or subtask whose deadline falls within the next
+// DUE_SOON_WINDOW_MS and hasn't been submitted yet — a heads-up before it
+// tips over into "delayed". Each assignee/subtask stamps a `dueSoonNotified`
+// flag (via a targeted array-element update) so it only ever fires once per
+// deadline; moving the due date clears the flag (see updateTask/updateSubtask).
+// Best-effort — one bad doc doesn't abort the sweep.
+export async function sendUpcomingDueReminders() {
+  await connectToDatabase();
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const windowEndIso = new Date(nowMs + DUE_SOON_WINDOW_MS).toISOString();
+
+  const docs = await Task.find({
+    cancelled: false,
+    dueDate: { $gt: nowIso, $lte: windowEndIso },
+  })
+    .lean()
+    .exec();
+  const withSubtasks = await Task.find({
+    cancelled: false,
+    "subtasks.expectedDate": { $gt: nowIso, $lte: windowEndIso },
+  })
+    .lean()
+    .exec();
+
+  const seen = new Set();
+  let reminded = 0;
+  const errors = [];
+  for (const doc of [...docs, ...withSubtasks]) {
+    if (seen.has(doc.id)) continue;
+    seen.add(doc.id);
+    try {
+      const task = stripMongo(doc);
+      normalizeTask(task);
+
+      if (task.dueDate) {
+        const msLeft = new Date(task.dueDate).getTime() - nowMs;
+        if (msLeft > 0 && msLeft <= DUE_SOON_WINDOW_MS) {
+          const dueInLabel = formatDueIn(msLeft);
+          for (const a of task.assignees) {
+            if (a.status === "completed" || a.status === "submitted") continue;
+            if (a.dueSoonNotified) continue;
+            const u = await store.findById(a.id);
+            if (!u) continue;
+            await Promise.allSettled([
+              u.email &&
+                emailTaskDueSoon({
+                  to: u.email,
+                  assigneeName: a.name,
+                  taskTitle: task.title,
+                  taskId: task.id,
+                  dueInLabel,
+                }),
+              pushTaskDueSoon({
+                userId: a.id,
+                taskTitle: task.title,
+                taskId: task.id,
+                dueInLabel,
+              }),
+            ]);
+            await Task.updateOne(
+              { id: task.id },
+              { $set: { "assignees.$[el].dueSoonNotified": true } },
+              { arrayFilters: [{ "el.id": a.id }] }
+            );
+            reminded++;
+          }
+        }
+      }
+
+      for (const s of task.subtasks || []) {
+        if (s.status === "done" || s.status === "submitted") continue;
+        if (!s.expectedDate || !s.assigneeId) continue;
+        if (s.dueSoonNotified) continue;
+        const msLeft = new Date(s.expectedDate).getTime() - nowMs;
+        if (msLeft <= 0 || msLeft > DUE_SOON_WINDOW_MS) continue;
+        const u = await store.findById(s.assigneeId);
+        if (!u) continue;
+        const dueInLabel = formatDueIn(msLeft);
+        await Promise.allSettled([
+          u.email &&
+            emailSubtaskDueSoon({
+              to: u.email,
+              assigneeName: s.assigneeName,
+              subtaskTitle: s.title,
+              taskTitle: task.title,
+              taskId: task.id,
+              subtaskKey: s.key,
+              dueInLabel,
+            }),
+          pushSubtaskDueSoon({
+            userId: s.assigneeId,
+            subtaskTitle: s.title,
+            taskTitle: task.title,
+            taskId: task.id,
+            subtaskKey: s.key,
+            dueInLabel,
+          }),
+        ]);
+        await Task.updateOne(
+          { id: task.id },
+          { $set: { "subtasks.$[el].dueSoonNotified": true } },
+          { arrayFilters: [{ "el.id": s.id }] }
+        );
+        reminded++;
+      }
+    } catch (err) {
+      errors.push({ id: doc.id, error: err?.message || String(err) });
+    }
+  }
+  return { reminded, considered: seen.size, errors };
 }
