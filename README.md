@@ -123,7 +123,7 @@ scripts/seed.js              # Seed demo accounts + print logins
 ## Security notes
 
 - Passwords are hashed with bcrypt and never returned by the API.
-- Every API route re-checks authentication and authorization server-side —
+- Every API route re-checks authentication and authorization server-side
   the UI hiding an action is never the only line of defense.
 - The Edge `proxy` only verifies the signed session cookie; Mongoose/bcrypt stay
   in the Node runtime (Auth.js split-config pattern).
