@@ -135,7 +135,7 @@ function AssigneeStack({ task }) {
 // "active" merges in-progress + assigned + in-review (tasks in the pipeline,
 // including those submitted and waiting on a reviewer). "approvals" is a
 // scope filter rather than a status one — it drives the same `scope` state
-// as the Approvals tab below, so clicking either stays in sync.
+// used by the filter logic below.
 const STAT_CARDS = [
   {
     key: "approvals",
@@ -218,7 +218,6 @@ const SCOPES = [
   { value: "all", label: "All" },
   { value: "mine", label: "My tasks" },
   { value: "created", label: "Created by me" },
-  { value: "approvals", label: "Approvals" },
   { value: "done-by-me", label: "Completed by me" },
   { value: "drafts", label: "Drafts" },
 ];
@@ -573,9 +572,6 @@ export function TasksClient({ tasks, currentUser, initialStatus = "all" }) {
             {scopes.map((s) => (
               <SelectItem key={s.value} value={s.value}>
                 {s.label}
-                {s.value === "approvals" && approvalCount > 0
-                  ? ` (${approvalCount})`
-                  : ""}
               </SelectItem>
             ))}
           </SelectContent>
@@ -589,11 +585,6 @@ export function TasksClient({ tasks, currentUser, initialStatus = "all" }) {
                 className="cursor-pointer rounded-md px-3 py-1.5 hover:bg-background/60 data-active:shadow-sm"
               >
                 {s.label}
-                {s.value === "approvals" && approvalCount > 0 && (
-                  <span className="ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full bg-violet-500/15 px-1 text-[10px] font-semibold text-violet-700 tabular-nums dark:text-violet-400">
-                    {approvalCount}
-                  </span>
-                )}
               </TabsTrigger>
             ))}
           </TabsList>

@@ -535,7 +535,11 @@ export async function getTaskStats(actor) {
 export async function getTaskAnalytics(actor) {
   const tasks = await listVisibleTasks(actor);
 
-  
+  // Subtask assignees need not be top-level task assignees (anyone involved
+  // can hand a subtask to anyone within their authority), so a person's role
+  // isn't always available from the task itself — look it up once.
+  const users = await store.list();
+  const roleById = new Map(users.map((u) => [u.id, u.role]));
 
 
 
@@ -547,29 +551,53 @@ export async function getTaskAnalytics(actor) {
 
 
 
-  // Per-person breakdown. Owners are excluded — they don't carry tasks.
+  // Per-person breakdown, combining top-level task assignments with subtask
+  // work — subtasks are real assigned work with their own review flow, and
+  // someone can carry subtasks without ever being a top-level assignee.
+  // Owners are excluded — they don't carry work.
   const map = new Map();
+  const bump = (id, name, role, part) => {
+    if (isOwner(role)) return;
+    const e =
+      map.get(id) ?? {
+        name,
+        role,
+        assigned: 0,
+        completed: 0,
+        delayed: 0,
+        open: 0,
+        tasksAssigned: 0,
+        subtasksAssigned: 0,
+      };
+    e.assigned += 1;
+    if (part === "task") e.tasksAssigned += 1;
+    else e.subtasksAssigned += 1;
+    map.set(id, e);
+    return e;
+  };
+
   for (const t of tasks) {
     if (t.status === "draft" || t.status === "cancelled") continue;
     for (const a of t.assignees) {
-      if (isOwner(a.role)) continue;
-      const e =
-        map.get(a.id) ?? {
-          name: a.name,
-          role: a.role,
-          assigned: 0,
-          completed: 0,
-          delayed: 0,
-          open: 0,
-        };
-      e.assigned += 1;
+      const e = bump(a.id, a.name, a.role, "task");
+      if (!e) continue;
       if (a.status === "completed") {
         e.completed += 1;
       } else {
         e.open += 1;
         if (t.delayed) e.delayed += 1;
       }
-      map.set(a.id, e);
+    }
+    for (const s of t.subtasks || []) {
+      if (!s.assigneeId) continue;
+      const e = bump(s.assigneeId, s.assigneeName, roleById.get(s.assigneeId), "subtask");
+      if (!e) continue;
+      if (s.status === "done") {
+        e.completed += 1;
+      } else {
+        e.open += 1;
+        if (s.overdue) e.delayed += 1;
+      }
     }
   }
 
@@ -585,13 +613,19 @@ export async function getTaskAnalytics(actor) {
     }))
     .sort((a, b) => b.completed - a.completed || b.assigned - a.assigned);
 
-  // Org totals over real (assigned, non-draft, non-cancelled) tasks. These form
-  // a clean partition: completed + delayed + onTrack === totalAssigned.
+  // Org totals over real (assigned, non-draft, non-cancelled) tasks and their
+  // subtasks. These form a clean partition: completed + delayed + onTrack ===
+  // totalAssigned.
   const active = tasks.filter(
     (t) => t.status !== "draft" && t.status !== "cancelled"
   );
   const completedTasks = active.filter((t) => t.status === "completed").length;
   const delayedTasks = active.filter((t) => t.status === "delayed").length;
+
+  const allSubtasks = active.flatMap((t) => t.subtasks || []);
+  const totalSubtasks = allSubtasks.length;
+  const completedSubtasks = allSubtasks.filter((s) => s.status === "done").length;
+  const delayedSubtasks = allSubtasks.filter((s) => s.overdue).length;
 
   return {
     totalAssigned: active.length,
@@ -601,6 +635,10 @@ export async function getTaskAnalytics(actor) {
     completionRate: active.length
       ? Math.round((completedTasks / active.length) * 100)
       : 0,
+    totalSubtasks,
+    completedSubtasks,
+    delayedSubtasks,
+    subtasksOnTrack: Math.max(0, totalSubtasks - completedSubtasks - delayedSubtasks),
     perUser,
   };
 }

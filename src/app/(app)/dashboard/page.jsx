@@ -199,6 +199,108 @@ export default async function DashboardPage() {
     </Card>
   );
 
+  // Work waiting on this manager to review — every manager/admin can approve
+  // any task's submission (see canReviewTask/isReviewer), so this is org-wide
+  // for them, not just tasks they created. Task-level submissions (per
+  // assignee) and subtask-level submissions are both surfaced here since both
+  // go through the same approve/send-back flow. Shown on every management
+  // dashboard (Chairman included) with its own empty state, same as the other
+  // review-focused cards.
+  const pendingApprovalTasks = manage
+    ? tasks
+        .flatMap((t) =>
+          t.assignees
+            .filter((a) => a.status === "submitted")
+            .map((a) => ({ task: t, assignee: a }))
+        )
+        .slice(0, 6)
+    : [];
+
+  const pendingApprovalSubtasks = manage
+    ? tasks
+        .flatMap((t) =>
+          (t.subtasks ?? [])
+            .filter((s) => s.status === "submitted")
+            .map((s) => ({ task: t, sub: s }))
+        )
+        .slice(0, 6)
+    : [];
+
+  const approvalsCount = pendingApprovalTasks.length + pendingApprovalSubtasks.length;
+
+  const approvalsCard = manage && (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          Pending your approval
+          {approvalsCount > 0 && (
+            <Badge className="bg-violet-500/15 text-violet-700 dark:text-violet-400">
+              {approvalsCount}
+            </Badge>
+          )}
+        </CardTitle>
+        <CardDescription>Submitted work waiting on a reviewer</CardDescription>
+        <CardAction>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/tasks?status=in_review">
+              View all
+              <ArrowRight className="size-4" />
+            </Link>
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardContent>
+        {approvalsCount === 0 ? (
+          <p className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
+            Nothing waiting on your approval right now.
+          </p>
+        ) : (
+          <ul className="divide-y">
+            {pendingApprovalTasks.map(({ task: t, assignee: a }) => (
+              <li key={`${t.id}-${a.id}`}>
+                <Link
+                  href={`/tasks/${t.key}`}
+                  className="-mx-2 flex items-center gap-3 rounded-md px-2 py-2.5 transition-colors hover:bg-accent/40"
+                >
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-400">
+                    <ClipboardCheck className="size-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{t.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {a.name} submitted their part for review
+                    </p>
+                  </div>
+                  <PriorityBadge priority={t.priority} />
+                </Link>
+              </li>
+            ))}
+            {pendingApprovalSubtasks.map(({ task: t, sub: s }) => (
+              <li key={s.id}>
+                <Link
+                  href={`/tasks/${t.key}/${s.key}`}
+                  className="-mx-2 flex items-center gap-3 rounded-md px-2 py-2.5 transition-colors hover:bg-accent/40"
+                >
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-400">
+                    <GitBranch className="size-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{s.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      Subtask of {t.title}
+                      {s.assigneeName ? ` · ${s.assigneeName} submitted` : ""}
+                    </p>
+                  </div>
+                  <PriorityBadge priority={s.priority} />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+
   // KPI row — shared by every dashboard. Focused on what needs attention right
   // now (active work, work waiting on a reviewer, recurring load, and anything
   // overdue) plus a quick look at what's coming up in meetings.
@@ -572,37 +674,43 @@ export default async function DashboardPage() {
             </CardContent>
           </Card>
 
-          {/* Side column: recently completed */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Recently completed</CardTitle>
-              <CardDescription>Latest closed work</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {completed.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No completed tasks yet.
-                </p>
-              ) : (
-                <ol className="space-y-2">
-                  {completed.map((t, i) => (
-                    <li key={t.id}>
-                      <Link
-                        href={`/tasks/${t.key}`}
-                        className="-mx-2 flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-accent/40"
-                      >
-                        <IndexChip n={i + 1} />
-                        <p className="min-w-0 flex-1 truncate text-sm font-medium">
-                          {t.title}
-                        </p>
-                        <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
-                      </Link>
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </CardContent>
-          </Card>
+          {/* Side column: split into two sections — approvals waiting on the
+              Chairman, then recently completed work — instead of one card
+              stretched to match the pending-tasks list's height. */}
+          <div className="flex flex-col gap-6">
+            {approvalsCard}
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Recently completed</CardTitle>
+                <CardDescription>Latest closed work</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {completed.length === 0 ? (
+                  <p className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
+                    No completed tasks yet.
+                  </p>
+                ) : (
+                  <ol className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {completed.map((t, i) => (
+                      <li key={t.id}>
+                        <Link
+                          href={`/tasks/${t.key}`}
+                          className="flex items-center gap-2 rounded-lg border bg-card p-2 transition-colors hover:bg-accent/40"
+                        >
+                          <IndexChip n={i + 1} />
+                          <p className="min-w-0 flex-1 truncate text-sm font-medium">
+                            {t.title}
+                          </p>
+                          <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
+                        </Link>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
 
         {createdCard}
@@ -782,6 +890,8 @@ export default async function DashboardPage() {
           </Card>
         )}
       </div>
+
+      {approvalsCard}
 
       {createdCard}
 

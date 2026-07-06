@@ -1,5 +1,13 @@
 import Link from "next/link";
-import { ClipboardList, CheckCircle2, AlertTriangle, CircleDashed, TrendingUp, ChevronRight } from "lucide-react";
+import {
+  ClipboardList,
+  CheckCircle2,
+  AlertTriangle,
+  CircleDashed,
+  TrendingUp,
+  ChevronRight,
+  ListTree,
+} from "lucide-react";
 
 import { requireManager } from "@/lib/session";
 import { getTaskAnalytics } from "@/lib/tasks";
@@ -38,6 +46,13 @@ export default async function ReportsPage() {
         <StatCard title="On track" value={a.onTrack} icon={CircleDashed} accent="amber" />
       </div>
 
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard title="Subtasks" value={a.totalSubtasks} icon={ListTree} accent="sky" />
+        <StatCard title="Sub. completed" value={a.completedSubtasks} icon={CheckCircle2} accent="emerald" />
+        <StatCard title="Sub. delayed" value={a.delayedSubtasks} icon={AlertTriangle} accent="rose" />
+        <StatCard title="Sub. on track" value={a.subtasksOnTrack} icon={CircleDashed} accent="amber" />
+      </div>
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -48,7 +63,7 @@ export default async function ReportsPage() {
         <CardContent>
           {a.perUser.length === 0 ? (
             <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-              No task data yet. Assign and complete some tasks to see analytics.
+              No task data yet. Assign and complete some tasks or subtasks to see analytics.
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -82,7 +97,12 @@ export default async function ReportsPage() {
                           <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
                         </Link>
                       </TableCell>
-                      <TableCell className="text-right">{u.assigned}</TableCell>
+                      <TableCell className="text-right">
+                        <span>{u.assigned}</span>
+                        <p className="text-xs text-muted-foreground">
+                          {u.tasksAssigned} tasks · {u.subtasksAssigned} subtasks
+                        </p>
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="flex flex-col items-end gap-1">
                           <span>
