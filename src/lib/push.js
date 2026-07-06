@@ -131,6 +131,30 @@ export async function pushSubtaskAssigned({
   });
 }
 
+export async function pushTaskDelayed({ userId, taskTitle, taskId }) {
+  await sendPushToUser(userId, {
+    title: "Task overdue ⚠️",
+    body: `"${taskTitle}" has passed its due date.`,
+    url: `/tasks/${taskId}`,
+    tag: `task-${taskId}-delayed`,
+  });
+}
+
+export async function pushSubtaskDelayed({
+  userId,
+  subtaskTitle,
+  taskTitle,
+  taskId,
+  subtaskKey,
+}) {
+  await sendPushToUser(userId, {
+    title: "Subtask overdue ⚠️",
+    body: `"${subtaskTitle}" in ${taskTitle} has passed its expected date.`,
+    url: `/tasks/${taskId}/${subtaskKey}`,
+    tag: `subtask-${taskId}-${subtaskKey}-delayed`,
+  });
+}
+
 export async function pushTaskCompleted({ userId, taskTitle, byName, taskId }) {
   await sendPushToUser(userId, {
     title: "Task completed ✅",
@@ -140,11 +164,104 @@ export async function pushTaskCompleted({ userId, taskTitle, byName, taskId }) {
   });
 }
 
+export async function pushRecurringAssigned({ userId, taskTitle, assignerName, recurringId }) {
+  await sendPushToUser(userId, {
+    title: "Recurring task assigned 🔁",
+    body: `${assignerName} added you to "${taskTitle}". Upload a result each day.`,
+    url: `/recurring/${recurringId}`,
+    tag: `recurring-${recurringId}`,
+  });
+}
+
+export async function pushRecurringReminder({ userId, taskTitle, recurringId }) {
+  await sendPushToUser(userId, {
+    title: "Today's log is due ⏰",
+    body: `Upload today's result for "${taskTitle}".`,
+    url: `/recurring/${recurringId}`,
+    tag: `recurring-${recurringId}-reminder`,
+  });
+}
+
 export async function pushMeetingInvite({ userId, title, byName, meetingId, when }) {
   await sendPushToUser(userId, {
     title: "Meeting invite",
     body: `${byName} invited you to "${title}"${when ? ` on ${when}` : ""}.`,
     url: `/meetings/${meetingId}`,
     tag: `meeting-${meetingId}`,
+  });
+}
+
+export async function pushTaskSubmitted({ userId, taskTitle, byName, taskId }) {
+  await sendPushToUser(userId, {
+    title: "Submitted for review 📝",
+    body: `${byName} submitted their part of "${taskTitle}" for review.`,
+    url: `/tasks/${taskId}`,
+    tag: `task-${taskId}-submitted`,
+  });
+}
+
+export async function pushSubmissionReturned({ userId, taskTitle, byName, taskId }) {
+  await sendPushToUser(userId, {
+    title: "Changes requested",
+    body: `${byName} sent your submission for "${taskTitle}" back for changes.`,
+    url: `/tasks/${taskId}`,
+    tag: `task-${taskId}-returned`,
+  });
+}
+
+export async function pushTaskApproved({ userId, taskTitle, byName, taskId }) {
+  await sendPushToUser(userId, {
+    title: "Submission approved ✅",
+    body: `${byName} approved your submission for "${taskTitle}".`,
+    url: `/tasks/${taskId}`,
+    tag: `task-${taskId}-approved`,
+  });
+}
+
+export async function pushSubtaskSubmitted({
+  userId,
+  subtaskTitle,
+  taskTitle,
+  byName,
+  taskId,
+  subtaskKey,
+}) {
+  await sendPushToUser(userId, {
+    title: "Subtask submitted for review 📝",
+    body: `${byName} submitted "${subtaskTitle}" (${taskTitle}) for your review.`,
+    url: `/tasks/${taskId}/${subtaskKey}`,
+    tag: `subtask-${taskId}-${subtaskKey}-submitted`,
+  });
+}
+
+export async function pushSubtaskApproved({
+  userId,
+  subtaskTitle,
+  taskTitle,
+  byName,
+  taskId,
+  subtaskKey,
+}) {
+  await sendPushToUser(userId, {
+    title: "Subtask approved ✅",
+    body: `${byName} approved "${subtaskTitle}" (${taskTitle}).`,
+    url: `/tasks/${taskId}/${subtaskKey}`,
+    tag: `subtask-${taskId}-${subtaskKey}-approved`,
+  });
+}
+
+export async function pushSubtaskReturned({
+  userId,
+  subtaskTitle,
+  taskTitle,
+  byName,
+  taskId,
+  subtaskKey,
+}) {
+  await sendPushToUser(userId, {
+    title: "Subtask sent back",
+    body: `${byName} sent "${subtaskTitle}" (${taskTitle}) back for changes.`,
+    url: `/tasks/${taskId}/${subtaskKey}`,
+    tag: `subtask-${taskId}-${subtaskKey}-returned`,
   });
 }

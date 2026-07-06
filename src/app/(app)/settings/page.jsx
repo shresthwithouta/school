@@ -8,6 +8,7 @@ import { formatDate, getInitials } from "@/lib/utils";
 import { TierBadge, RoleBadge } from "@/components/role-badge";
 import { ProfileForm } from "@/components/profile/profile-form";
 import { PasswordForm } from "@/components/profile/password-form";
+import { SignOutButton } from "@/components/profile/sign-out-button";
 import { PushNotifications } from "@/components/push-notifications";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -98,6 +99,18 @@ export default async function SettingsPage() {
             </CardHeader>
             <CardContent>
               <PasswordForm />
+            </CardContent>
+          </Card>
+
+          <Card className="mt-4">
+            <CardHeader>
+              <CardTitle>Session</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground">
+                Sign out of your account on this device.
+              </p>
+              <SignOutButton />
             </CardContent>
           </Card>
         </TabsContent>

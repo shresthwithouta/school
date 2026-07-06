@@ -5,7 +5,7 @@ import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, Paperclip, X } from "lucide-react";
 
 import {
   Dialog,
@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DateTimePicker } from "@/components/ui/date-time-picker";
 import { RichTextEditor } from "@/components/rich-text";
+import { AttachmentList, AttachmentUploader } from "@/components/attachments";
 import { UserCombobox, } from "@/components/tasks/user-combobox";
 import { createTaskSchema } from "@/lib/validation";
 import { TASK_PRIORITIES, PRIORITY_META } from "@/lib/task-meta";
@@ -61,6 +62,47 @@ export function TaskDialog({
   const [selected, setSelected] = useState(
     task ? task.assignees.map((a) => a.id) : [currentUserId]
   );
+  // Reference files/voice notes for the task itself (not a submission). In
+  // "edit" mode the task already has an id, so each add/remove persists right
+  // away via the task attachment endpoints. In "create" mode there's no task
+  // yet, so uploads are staged locally and sent along with the create request.
+  const [attachments, setAttachments] = useState(task?.attachments ?? []);
+
+  async function addAttachment(a) {
+    if (mode === "create") {
+      setAttachments((p) => [...p, a]);
+      return;
+    }
+    const res = await fetch(`/api/tasks/${task.id}/attachments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(a),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(data.error ?? "Could not add attachment");
+      return;
+    }
+    setAttachments(data.task.attachments);
+    router.refresh();
+  }
+
+  async function removeAttachment(att, index) {
+    if (mode === "create") {
+      setAttachments((p) => p.filter((_, i) => i !== index));
+      return;
+    }
+    const res = await fetch(`/api/tasks/${task.id}/attachments/${att.id}`, {
+      method: "DELETE",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(data.error ?? "Could not remove attachment");
+      return;
+    }
+    setAttachments(data.task.attachments);
+    router.refresh();
+  }
 
   const {
     register,
@@ -93,7 +135,11 @@ export function TaskDialog({
     const res = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...values, assigneeIds: selected }),
+      body: JSON.stringify({
+        ...values,
+        assigneeIds: selected,
+        ...(mode === "create" ? { attachments } : {}),
+      }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -105,6 +151,7 @@ export function TaskDialog({
     if (mode === "create") {
       reset();
       setSelected([currentUserId]);
+      setAttachments([]);
     }
     router.refresh();
   }
@@ -190,6 +237,44 @@ export function TaskDialog({
                   placeholder="No due date"
                 />
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>
+                Attachments{" "}
+                <span className="text-muted-foreground">(files or a voice note)</span>
+              </Label>
+              {mode === "edit" ? (
+                <AttachmentList
+                  attachments={attachments}
+                  onRemove={(attId) =>
+                    removeAttachment(attachments.find((a) => a.id === attId))
+                  }
+                  canRemove={() => true}
+                />
+              ) : (
+                attachments.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {attachments.map((a, i) => (
+                      <span
+                        key={`${a.publicId}-${i}`}
+                        className="inline-flex items-center gap-1.5 rounded-full border bg-muted px-2 py-1 text-xs"
+                      >
+                        <Paperclip className="size-3" />
+                        <span className="max-w-40 truncate">{a.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(a, i)}
+                          className="text-muted-foreground hover:text-destructive"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )
+              )}
+              <AttachmentUploader onAdd={addAttachment} />
             </div>
           </div>
 

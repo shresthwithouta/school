@@ -182,10 +182,12 @@ export function MeetingPageClient({
               {completed ? "Completed" : "Scheduled"}
             </Badge>
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight">{meeting.title}</h1>
-          <p className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-            <CalendarClock className="size-4" />
-            {meeting.scheduledAt ? formatDateTime(meeting.scheduledAt) : "No time set"}
+          <h1 className="wrap-break-word text-2xl font-semibold tracking-tight">{meeting.title}</h1>
+          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <CalendarClock className="size-4" />
+              {meeting.scheduledAt ? formatDateTime(meeting.scheduledAt) : "No time set"}
+            </span>
             {" · by "}
             {meeting.createdByName}
           </p>
@@ -294,19 +296,21 @@ export function MeetingPageClient({
                     rows={2}
                     className="bg-background"
                   />
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label className="text-xs text-muted-foreground">
-                      Target date
-                    </label>
-                    <DateTimePicker
-                      value={decisionDate}
-                      onChange={setDecisionDate}
-                      placeholder="No target date"
-                      className="w-auto min-w-44"
-                    />
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="flex items-center gap-2">
+                      <label className="shrink-0 text-xs text-muted-foreground">
+                        Target date
+                      </label>
+                      <DateTimePicker
+                        value={decisionDate}
+                        onChange={setDecisionDate}
+                        placeholder="No target date"
+                        className="w-auto min-w-44"
+                      />
+                    </div>
                     <Button
                       size="sm"
-                      className="ml-auto"
+                      className="w-full sm:ml-auto sm:w-auto"
                       onClick={addDecision}
                       disabled={busy === "add-decision" || !decision.trim()}
                     >
@@ -346,7 +350,7 @@ export function MeetingPageClient({
                         <div className="min-w-0 flex-1">
                           <span
                             className={cn(
-                              "text-sm",
+                              "wrap-break-word text-sm",
                               d.done && "text-muted-foreground line-through"
                             )}
                           >
@@ -421,9 +425,9 @@ export function MeetingPageClient({
                         </AvatarFallback>
                       </Avatar>
                       <div className="min-w-0 flex-1 rounded-lg border p-2.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-medium">{m.authorName}</span>
-                          <span className="text-xs text-muted-foreground">
+                        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+                          <span className="truncate text-sm font-medium">{m.authorName}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
                             {formatDateTime(m.createdAt)}
                           </span>
                         </div>

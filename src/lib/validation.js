@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ROLES } from "@/lib/rbac";
 import { TASK_PRIORITIES } from "@/lib/task-meta";
-import { RECURRENCE_FREQS } from "@/lib/recurrence";
+import { SCHEDULE_FREQS } from "@/lib/recurring-schedule";
 
 const roleEnum = z.enum(ROLES);
 const optionalText = (max) =>
@@ -76,32 +76,6 @@ const priorityEnum = z.enum(TASK_PRIORITIES);
 // Rich-text HTML field (sanitized server-side before storing).
 const richText = z.string().max(20000).optional().or(z.literal(""));
 
-// Optional recurrence rule. `null`/absent = a one-off task. Only takes effect
-// when the task has assignees (a recurring draft has no one to remind).
-const recurrence = z
-  .object({ freq: z.enum(RECURRENCE_FREQS) })
-  .nullable()
-  .optional();
-
-export const createTaskSchema = z.object({
-  title: z.string().trim().min(2, "Title is too short").max(140),
-  description: richText,
-  // Empty = a draft task (not assigned to anyone yet). The cap is generous so a
-  // bulk "assign all Teachers" (a whole role group) isn't rejected.
-  assigneeIds: z.array(z.string().min(1)).max(200).optional().default([]),
-  priority: priorityEnum.default("medium"),
-  dueDate: z.string().trim().optional().or(z.literal("")),
-  recurrence,
-});
-
-export const updateTaskSchema = z.object({
-  title: z.string().trim().min(2).max(140).optional(),
-  description: richText,
-  assigneeIds: z.array(z.string().min(1)).max(200).optional(),
-  priority: priorityEnum.optional(),
-  dueDate: z.string().trim().optional().or(z.literal("")),
-});
-
 export const attachmentSchema = z.object({
   url: z
     .string()
@@ -113,6 +87,26 @@ export const attachmentSchema = z.object({
   bytes: z.coerce.number().int().min(0),
   name: z.string().min(1).max(255),
   kind: z.enum(["image", "audio", "video", "file"]),
+});
+
+export const createTaskSchema = z.object({
+  title: z.string().trim().min(2, "Title is too short").max(140),
+  description: richText,
+  // Empty = a draft task (not assigned to anyone yet). The cap is generous so a
+  // bulk "assign all Teachers" (a whole role group) isn't rejected.
+  assigneeIds: z.array(z.string().min(1)).max(200).optional().default([]),
+  priority: priorityEnum.default("medium"),
+  dueDate: z.string().trim().optional().or(z.literal("")),
+  // Reference files/voice notes attached while writing the task.
+  attachments: z.array(attachmentSchema).max(10).optional().default([]),
+});
+
+export const updateTaskSchema = z.object({
+  title: z.string().trim().min(2).max(140).optional(),
+  description: richText,
+  assigneeIds: z.array(z.string().min(1)).max(200).optional(),
+  priority: priorityEnum.optional(),
+  dueDate: z.string().trim().optional().or(z.literal("")),
 });
 
 export const transitionSchema = z.object({
@@ -163,6 +157,54 @@ export const updateSubtaskSchema = z.object({
 
 
 
+
+// ── Recurring tasks ────────────────────────────────────────────────
+// A recurring task is one ongoing assignment whose schedule decides which days
+// are "due". `everyN` needs an interval; `weekly` needs a weekday.
+const recurringSchedule = z
+  .object({
+    freq: z.enum(SCHEDULE_FREQS),
+    intervalDays: z.coerce.number().int().min(1).max(90).optional(),
+    weekday: z.coerce.number().int().min(0).max(6).optional(),
+  })
+  .refine((s) => s.freq !== "everyN" || (s.intervalDays ?? 0) >= 1, {
+    message: "Choose how many days between each occurrence.",
+    path: ["intervalDays"],
+  });
+
+const optionalDate = z.string().trim().optional().or(z.literal(""));
+
+export const createRecurringSchema = z.object({
+  title: z.string().trim().min(2, "Title is too short").max(140),
+  description: richText,
+  assigneeIds: z.array(z.string().min(1)).min(1, "Assign at least one person").max(200),
+  priority: priorityEnum.default("medium"),
+  schedule: recurringSchedule,
+  startDate: optionalDate,
+  endDate: optionalDate,
+});
+
+export const updateRecurringSchema = z.object({
+  title: z.string().trim().min(2).max(140).optional(),
+  description: richText,
+  assigneeIds: z.array(z.string().min(1)).min(1).max(200).optional(),
+  priority: priorityEnum.optional(),
+  endDate: optionalDate,
+  // Lifecycle toggles — at most one is acted on per request.
+  action: z.enum(["pause", "resume", "end"]).optional(),
+});
+
+// One assignee's result for a given due day. The note is required so an entry
+// always says *what* was done; files are optional supporting uploads.
+export const recurringEntrySchema = z.object({
+  day: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid day")
+    .optional()
+    .or(z.literal("")),
+  note: z.string().trim().min(3, "Add a short note about today's work").max(5000),
+  files: z.array(attachmentSchema).max(10).optional(),
+});
 
 // ── Meetings ───────────────────────────────────────────────────────
 // Optional external meeting link (Zoom/Meet/Teams). Only http(s) URLs are

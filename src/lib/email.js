@@ -83,6 +83,10 @@ export function meetingUrl(meetingId) {
   return `${baseUrl()}/meetings/${meetingId}`;
 }
 
+export function recurringUrl(recurringId) {
+  return `${baseUrl()}/recurring/${recurringId}`;
+}
+
 /** A "When:" / "Join link:" detail block for meeting emails (omits blank rows). */
 function meetingDetails(args) {
   const rows = [];
@@ -178,6 +182,37 @@ export async function emailTaskRecurring(args) {
   });
 }
 
+/**
+ * To an assignee: they've been added to a recurring task. Unlike the old flow,
+ * nothing is cloned — they open the one task and upload a result each due day.
+ */
+export async function emailRecurringAssigned(args) {
+  await sendEmail({
+    to: args.to,
+    subject: `Recurring task assigned: ${args.taskTitle}`,
+    html: layout(
+      "You've been added to a recurring task 🔁",
+      `Hi ${esc(args.assigneeName)}, <strong>${esc(args.assignerName)}</strong> added you to the recurring task <strong>${esc(args.taskTitle)}</strong>${
+        args.cadence ? ` (${esc(args.cadence)})` : ""
+      }. Open it and upload your result on each scheduled day — the whole log stays visible to you and your reviewers.`,
+      { label: "Open recurring task", href: recurringUrl(args.recurringId) }
+    ),
+  });
+}
+
+/** A daily nudge to an assignee who hasn't logged today's recurring result. */
+export async function emailRecurringReminder(args) {
+  await sendEmail({
+    to: args.to,
+    subject: `Today's log: ${args.taskTitle}`,
+    html: layout(
+      "Your recurring task needs today's result ⏰",
+      `Hi ${esc(args.assigneeName)}, you haven't uploaded today's result for <strong>${esc(args.taskTitle)}</strong> yet. Open it to add your note and any files.`,
+      { label: "Upload today's result", href: recurringUrl(args.recurringId) }
+    ),
+  });
+}
+
 export async function emailSubtaskAssigned(args) {
   await sendEmail({
     to: args.to,
@@ -185,6 +220,32 @@ export async function emailSubtaskAssigned(args) {
     html: layout(
       "You've been assigned a subtask",
       `Hi ${esc(args.assigneeName)}, <strong>${esc(args.assignerName)}</strong> assigned you the subtask <strong>${esc(args.subtaskTitle)}</strong> under the task <strong>${esc(args.taskTitle)}</strong>. Open it to get started.`,
+      { label: "Open subtask", href: subtaskUrl(args.taskId, args.subtaskKey) }
+    ),
+  });
+}
+
+/** To an assignee: their task passed its due date and is now overdue. */
+export async function emailTaskDelayed(args) {
+  await sendEmail({
+    to: args.to,
+    subject: `Overdue: ${args.taskTitle}`,
+    html: layout(
+      "Your task is now overdue ⚠️",
+      `Hi ${esc(args.assigneeName)}, the task <strong>${esc(args.taskTitle)}</strong> was due ${args.daysLate} day${args.daysLate === 1 ? "" : "s"} ago. Open it to update your progress.`,
+      { label: "Open task", href: taskUrl(args.taskId) }
+    ),
+  });
+}
+
+/** To a subtask's assignee: it passed its expected date and is now overdue. */
+export async function emailSubtaskDelayed(args) {
+  await sendEmail({
+    to: args.to,
+    subject: `Overdue: ${args.subtaskTitle}`,
+    html: layout(
+      "Your subtask is now overdue ⚠️",
+      `Hi ${esc(args.assigneeName)}, the subtask <strong>${esc(args.subtaskTitle)}</strong> under <strong>${esc(args.taskTitle)}</strong> was due ${args.daysLate} day${args.daysLate === 1 ? "" : "s"} ago. Open it to update your progress.`,
       { label: "Open subtask", href: subtaskUrl(args.taskId, args.subtaskKey) }
     ),
   });
@@ -226,6 +287,58 @@ export async function emailSubmissionReturned(args) {
         args.reason ? ` Reason: ${esc(args.reason)}.` : ""
       } Open it to update and resubmit.`,
       { label: "Open task", href: taskUrl(args.taskId) }
+    ),
+  });
+}
+
+/** To the assignee: their individual submission on the task was approved. */
+export async function emailTaskApproved(args) {
+  await sendEmail({
+    to: args.to,
+    subject: `Approved: ${args.taskTitle}`,
+    html: layout(
+      "Your submission was approved ✅",
+      `Hi ${esc(args.assigneeName)}, <strong>${esc(args.byName)}</strong> approved your submission for <strong>${esc(args.taskTitle)}</strong>.`,
+      { label: "View task", href: taskUrl(args.taskId) }
+    ),
+  });
+}
+
+/** To a subtask reviewer (its creator, the task creator, or a manager): submitted for review. */
+export async function emailSubtaskSubmitted(args) {
+  await sendEmail({
+    to: args.to,
+    subject: `Submitted for review: ${args.subtaskTitle}`,
+    html: layout(
+      "Subtask submitted for review 📝",
+      `Hi ${esc(args.recipientName)}, <strong>${esc(args.byName)}</strong> submitted the subtask <strong>${esc(args.subtaskTitle)}</strong> (under <strong>${esc(args.taskTitle)}</strong>) for your review. Open it to approve or send it back.`,
+      { label: "Review subtask", href: subtaskUrl(args.taskId, args.subtaskKey) }
+    ),
+  });
+}
+
+/** To the subtask assignee: their subtask was approved. */
+export async function emailSubtaskApproved(args) {
+  await sendEmail({
+    to: args.to,
+    subject: `Approved: ${args.subtaskTitle}`,
+    html: layout(
+      "Your subtask was approved ✅",
+      `Hi ${esc(args.assigneeName)}, <strong>${esc(args.byName)}</strong> approved your subtask <strong>${esc(args.subtaskTitle)}</strong> (under <strong>${esc(args.taskTitle)}</strong>).`,
+      { label: "View subtask", href: subtaskUrl(args.taskId, args.subtaskKey) }
+    ),
+  });
+}
+
+/** To the subtask assignee: their subtask submission was sent back for changes. */
+export async function emailSubtaskReturned(args) {
+  await sendEmail({
+    to: args.to,
+    subject: `Changes requested: ${args.subtaskTitle}`,
+    html: layout(
+      "Your subtask was sent back",
+      `Hi ${esc(args.assigneeName)}, <strong>${esc(args.byName)}</strong> sent your subtask <strong>${esc(args.subtaskTitle)}</strong> (under <strong>${esc(args.taskTitle)}</strong>) back for changes. Open it to update and resubmit.`,
+      { label: "Open subtask", href: subtaskUrl(args.taskId, args.subtaskKey) }
     ),
   });
 }

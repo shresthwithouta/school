@@ -76,30 +76,66 @@ export async function getExistingSubscription() {
   return reg.pushManager.getSubscription();
 }
 
+/** Turn a raw subscribe() rejection into something a user can act on. */
+function describeSubscribeError(err) {
+  switch (err?.name) {
+    case "NotAllowedError":
+      return "Notifications are blocked for this app. Enable them in your phone's Settings → Apps → SWM → Notifications, then try again.";
+    case "AbortError":
+      return "Couldn't reach the push service — check your connection and try again.";
+    case "InvalidStateError":
+      return "This device's notification registration is out of sync. Try again in a moment.";
+    default:
+      return err?.message || "Could not enable notifications.";
+  }
+}
+
 /**
- * Subscribe this device (reusing an existing subscription if there is one) and
- * persist it to the server. `welcome` asks the server to send one confirmation
- * push so the user sees straight away that it works. Returns the subscription.
+ * Subscribe this device and persist it to the server. `welcome` asks the
+ * server to send one confirmation push so the user sees straight away that it
+ * works. Returns the subscription.
+ *
+ * If a subscription already exists (e.g. a previous disable didn't fully
+ * clear it, or the VAPID key rotated) it's cleared out first — some Android
+ * browsers reject a fresh subscribe() while a stale one is still registered,
+ * which is the "won't turn back on after disabling" failure mode.
  */
 export async function subscribeThisDevice({ welcome = false } = {}) {
   const reg = await navigator.serviceWorker.ready;
-  let sub = await reg.pushManager.getSubscription();
-  if (!sub) {
+  const existing = await reg.pushManager.getSubscription();
+  if (existing) {
+    try {
+      await existing.unsubscribe();
+    } catch {
+      // Best-effort — fall through and try to subscribe fresh anyway.
+    }
+  }
+  let sub;
+  try {
     sub = await reg.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
     });
+  } catch (err) {
+    throw new Error(describeSubscribeError(err));
   }
   await postJSON("/api/push/subscribe", { subscription: sub.toJSON(), welcome });
   return sub;
 }
 
-/** Remove this device's subscription (opt-out). */
+/**
+ * Remove this device's subscription (opt-out). Always tells the server, even
+ * if the browser-side unsubscribe() fails, so a stale row never keeps
+ * receiving pushes after the user has turned notifications off.
+ */
 export async function unsubscribeThisDevice() {
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.getSubscription();
   if (!sub) return;
   const { endpoint } = sub;
-  await sub.unsubscribe();
-  await postJSON("/api/push/unsubscribe", { endpoint });
+  try {
+    await sub.unsubscribe();
+  } finally {
+    await postJSON("/api/push/unsubscribe", { endpoint });
+  }
 }

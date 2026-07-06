@@ -12,17 +12,35 @@ import {
   emailTaskCompleted,
   emailTaskSubmitted,
   emailSubmissionReturned,
+  emailTaskApproved,
+  emailSubtaskSubmitted,
+  emailSubtaskApproved,
+  emailSubtaskReturned,
   emailMention,
   emailSubtaskAssigned,
   emailTaskRecurring,
+  emailTaskDelayed,
+  emailSubtaskDelayed,
 } from "@/lib/email";
-import { pushTaskAssigned, pushTaskCompleted, pushSubtaskAssigned } from "@/lib/push";
+import {
+  pushTaskAssigned,
+  pushTaskCompleted,
+  pushSubtaskAssigned,
+  pushTaskSubmitted,
+  pushSubmissionReturned,
+  pushTaskApproved,
+  pushSubtaskSubmitted,
+  pushSubtaskApproved,
+  pushSubtaskReturned,
+  pushTaskDelayed,
+  pushSubtaskDelayed,
+} from "@/lib/push";
 import {
   computeNextRun,
   occurrenceDueFor,
   describeRecurrence,
-  isRecurrenceFreq,
 } from "@/lib/recurrence";
+import { todayDayKey } from "@/lib/recurring-schedule";
 import { canManage, isOwner } from "@/lib/rbac";
 import {
   canReviewTask,
@@ -388,9 +406,10 @@ function canControlTask(actor, task) {
   return isInvolved(actor, task);
 }
 
-// Only the creator (assigner) may edit the task itself.
+// Only the creator (assigner) or a manager (Owner/Admin tier) may edit the
+// task itself — e.g. move the due date. Assignees cannot.
 function canEdit(actor, task) {
-  return actor.id === task.assignerId;
+  return actor.id === task.assignerId || canManage(actor.role);
 }
 
 // Deletion is broader than editing: the creator can delete their own task, and
@@ -459,6 +478,7 @@ export function computeTaskStats(tasks, actorId) {
     draft: 0,
     pending: 0,
     inProgress: 0,
+    inReview: 0,
     delayed: 0,
     completed: 0,
     cancelled: 0,
@@ -468,6 +488,7 @@ export function computeTaskStats(tasks, actorId) {
     if (t.status === "draft") stats.draft += 1;
     else if (t.status === "assigned") stats.pending += 1;
     else if (t.status === "in_progress") stats.inProgress += 1;
+    else if (t.status === "in_review") stats.inReview += 1;
     else if (t.status === "delayed") stats.delayed += 1;
     else if (t.status === "completed") stats.completed += 1;
     else if (t.status === "cancelled") stats.cancelled += 1;
@@ -577,6 +598,15 @@ export async function getTaskAnalytics(actor) {
 }
 
 // ── Mutations ──────────────────────────────────────────────────────
+// Full-oversight recipients (Chairman/Director tier) for task/subtask review
+// events — the "director and all" audience beyond the direct assigner/assignee,
+// so leadership sees every submit/return/complete without being on the task.
+// `exclude` is a set of ids already being notified separately (avoids duplicates).
+async function oversightRecipients(exclude) {
+  const users = await store.list();
+  return users.filter((u) => isOwner(u.role) && !exclude.has(u.id));
+}
+
 // Assignment notifications. One person → a personalized email. Multiple people
 // at once → a single email addressed to the assigner with everyone in CC, so the
 // whole group can see who else is on the task (instead of N isolated emails).
@@ -774,28 +804,16 @@ export async function createTask(
   const id = crypto.randomUUID();
   const names = assignees.map((a) => a.name).join(", ");
 
-  // Recurrence only applies to an assigned task — a recurring draft has no one
-  // to remind. When on, this first task is the series template AND its first
-  // occurrence: it's due at the end of today and `nextRunAt` schedules the next.
-  const freq =
-    input.recurrence && isRecurrenceFreq(input.recurrence.freq) && assignees.length
-      ? input.recurrence.freq
-      : null;
-
   const task = {
     id,
     key: `${keyPrefix(title)}-${keyNum(id)}`,
     title,
     description: cleanHtml(input.description),
     priority: input.priority,
-    dueDate: freq
-      ? occurrenceDueFor(ts)
-      : input.dueDate
-        ? new Date(input.dueDate).toISOString()
-        : null,
-    recurrence: freq ? { freq, active: true } : null,
+    dueDate: input.dueDate ? new Date(input.dueDate).toISOString() : null,
+    recurrence: null,
     recurrenceParentId: null,
-    nextRunAt: freq ? computeNextRun(freq, ts) : null,
+    nextRunAt: null,
     cancelled: false,
     cancelledAt: null,
     assignerId: actor.id,
@@ -804,15 +822,13 @@ export async function createTask(
     assignees,
     subtasks: [],
     comments: [],
-    attachments: [],
+    attachments: (input.attachments ?? []).map((a) => buildAttachment(actor, a)),
     activity: [
       activity(
         actor,
         !assignees.length
           ? "created this task as a draft"
-          : freq
-            ? `created a recurring task (${describeRecurrence({ freq })}) and assigned it to ${names}`
-            : `created this task and assigned it to ${names}`
+          : `created this task and assigned it to ${names}`
       ),
     ],
     createdAt: ts,
@@ -1138,8 +1154,17 @@ export async function updateSubtask(
 
   const involved = isInvolved(actor, task);
   const isSubAssignee = sub.assigneeId === actor.id;
+  // Who may reschedule this subtask's due date: whoever raised it, the parent
+  // task's creator, or a manager — never just the assignee. Mirrors canEdit
+  // on tasks (only the assigner/manager moves the deadline).
+  const subCreatorId = sub.createdById || task.assignerId;
+  const subReviewer = actor.id === subCreatorId || canReviewTask(actor, task);
   // Set when the assignee is changed to someone new, so we can email them below.
   let notifyUser = null;
+  // Set by the status transition below, consumed in the after() block further down.
+  let notifySubtaskSubmit = null; // { subCreatorId }
+  let notifySubtaskApprovedTo = null; // sub.assigneeId
+  let notifySubtaskReturnedTo = null; // sub.assigneeId
 
   // Subtask review workflow (mirrors tasks): the assignee works it
   // (todo → in_progress) and submits it (→ submitted); only the subtask's
@@ -1147,8 +1172,7 @@ export async function updateSubtask(
   // back (→ in_progress). The assignee can't close their own subtask.
   if (input.status !== undefined && input.status !== sub.status) {
     const target = input.status;
-    const subCreatorId = sub.createdById || task.assignerId;
-    const subReviewer = actor.id === subCreatorId || canReviewTask(actor, task);
+    const prevStatus = sub.status;
     if (target === "done") {
       if (!subReviewer) {
         throw new AppError("Only the subtask's creator can approve and close it.", 403);
@@ -1170,6 +1194,18 @@ export async function updateSubtask(
           ? `approved subtask "${sub.title}"`
           : `marked subtask "${sub.title}" as ${target}`;
     task.activity.push(activity(actor, verb));
+
+    if (target === "submitted") {
+      notifySubtaskSubmit = { subCreatorId };
+    } else if (target === "done") {
+      if (sub.assigneeId && sub.assigneeId !== actor.id) {
+        notifySubtaskApprovedTo = sub.assigneeId;
+      }
+    } else if (target === "in_progress" && prevStatus === "submitted") {
+      if (sub.assigneeId && sub.assigneeId !== actor.id) {
+        notifySubtaskReturnedTo = sub.assigneeId;
+      }
+    }
   }
 
   // Title / assignee / expected date can be edited by anyone involved in the
@@ -1183,6 +1219,14 @@ export async function updateSubtask(
   if (wantsMeta) {
     if (!involved) {
       throw new AppError("Only people on this task can edit subtask details.", 403);
+    }
+    // The due date is the one field the assignee can't move themselves —
+    // only whoever raised the subtask, the task creator, or a manager can.
+    if (input.expectedDate !== undefined && !subReviewer) {
+      throw new AppError(
+        "Only the subtask's creator or a manager can change its due date.",
+        403
+      );
     }
     if (input.title !== undefined) sub.title = input.title.trim();
     if (input.description !== undefined) sub.description = cleanHtml(input.description);
@@ -1236,6 +1280,100 @@ export async function updateSubtask(
     );
   }
 
+  // Subtask review-lifecycle notifications — submitted (to its reviewers +
+  // oversight), approved / sent back (to its assignee). Best-effort.
+  if (notifySubtaskSubmit || notifySubtaskApprovedTo || notifySubtaskReturnedTo) {
+    after(async () => {
+      try {
+        if (notifySubtaskSubmit) {
+          const seen = new Set([actor.id]);
+          const direct = [];
+          for (const id of new Set([notifySubtaskSubmit.subCreatorId, task.assignerId])) {
+            if (!id || seen.has(id)) continue;
+            seen.add(id);
+            const u = await store.findById(id);
+            if (u) direct.push(u);
+          }
+          const recipients = [...direct, ...(await oversightRecipients(seen))];
+          await Promise.allSettled(
+            recipients.flatMap((r) => [
+              r.email &&
+                emailSubtaskSubmitted({
+                  to: r.email,
+                  recipientName: r.name,
+                  byName: actor.name,
+                  subtaskTitle: sub.title,
+                  taskTitle: task.title,
+                  taskId: task.id,
+                  subtaskKey: sub.key,
+                }),
+              pushSubtaskSubmitted({
+                userId: r.id,
+                subtaskTitle: sub.title,
+                taskTitle: task.title,
+                byName: actor.name,
+                taskId: task.id,
+                subtaskKey: sub.key,
+              }),
+            ]).filter(Boolean)
+          );
+        }
+        if (notifySubtaskApprovedTo) {
+          const u = await store.findById(notifySubtaskApprovedTo);
+          if (u) {
+            await Promise.allSettled([
+              u.email &&
+                emailSubtaskApproved({
+                  to: u.email,
+                  assigneeName: u.name,
+                  byName: actor.name,
+                  subtaskTitle: sub.title,
+                  taskTitle: task.title,
+                  taskId: task.id,
+                  subtaskKey: sub.key,
+                }),
+              pushSubtaskApproved({
+                userId: u.id,
+                subtaskTitle: sub.title,
+                taskTitle: task.title,
+                byName: actor.name,
+                taskId: task.id,
+                subtaskKey: sub.key,
+              }),
+            ]);
+          }
+        }
+        if (notifySubtaskReturnedTo) {
+          const u = await store.findById(notifySubtaskReturnedTo);
+          if (u) {
+            await Promise.allSettled([
+              u.email &&
+                emailSubtaskReturned({
+                  to: u.email,
+                  assigneeName: u.name,
+                  byName: actor.name,
+                  subtaskTitle: sub.title,
+                  taskTitle: task.title,
+                  taskId: task.id,
+                  subtaskKey: sub.key,
+                }),
+              pushSubtaskReturned({
+                userId: u.id,
+                subtaskTitle: sub.title,
+                taskTitle: task.title,
+                byName: actor.name,
+                taskId: task.id,
+                subtaskKey: sub.key,
+              }),
+            ]);
+          }
+        }
+      } catch (err) {
+        console.error("Subtask notification failed:", err);
+      }
+    });
+  }
+
   return viewTask(actor, task);
 }
 
@@ -1273,6 +1411,7 @@ export async function transitionTask(
   // Set after the switch so the relevant email fires once, after the response.
   let notifySubmitTo = null; // assigner id — work was submitted for review
   let notifyReturnTo = null; // { id, reason } — a submission was sent back
+  let notifyApprovedTo = null; // assignee id — their individual submission was approved
 
   const pushComment = (text, kind, extra = {}) => {
     task.comments.push({
@@ -1345,6 +1484,9 @@ export async function transitionTask(
       target.completedAt = now();
       if (input.note) pushComment(input.note, "feedback");
       task.activity.push(activity(actor, `approved ${target.name}'s submission`));
+      if (target.id !== actor.id) {
+        notifyApprovedTo = target.id;
+      }
       break;
     }
     // Reviewer sends a submitted part back for changes → in_progress.
@@ -1413,57 +1555,108 @@ export async function transitionTask(
   await saveTask(task);
 
   // All notifications are best-effort and run after the response is sent so they
-  // never block the action: submitted-for-review (to the assigner), sent-back
-  // (to the assignee), and whole-task-completed (to the creator).
+  // never block the action: submitted-for-review (to the assigner + oversight),
+  // sent-back (to the assignee), approved (to the assignee), and
+  // whole-task-completed (to the creator + oversight).
   const nowCompleted = deriveTaskStatus(task) === "completed";
   const completedNow = !wasCompleted && nowCompleted;
-  if (notifySubmitTo || notifyReturnTo || completedNow) {
+  if (notifySubmitTo || notifyReturnTo || notifyApprovedTo || completedNow) {
     after(async () => {
       try {
         if (notifySubmitTo) {
-          const creator = await store.findById(notifySubmitTo);
-          if (creator && creator.id !== actor.id && creator.email) {
-            await emailTaskSubmitted({
-              to: creator.email,
-              creatorName: creator.name,
-              byName: actor.name,
-              taskTitle: task.title,
-              taskId: task.id,
-            });
-          }
-        }
-        if (notifyReturnTo) {
-          const u = await store.findById(notifyReturnTo.id);
-          if (u && u.email) {
-            await emailSubmissionReturned({
-              to: u.email,
-              assigneeName: u.name,
-              byName: actor.name,
-              taskTitle: task.title,
-              taskId: task.id,
-              reason: notifyReturnTo.reason,
-            });
-          }
-        }
-        if (completedNow) {
-          const creator = await store.findById(task.assignerId);
-          if (creator && creator.id !== actor.id) {
-            await Promise.allSettled([
-              emailTaskCompleted({
-                to: creator.email,
-                creatorName: creator.name,
+          const seen = new Set([actor.id]);
+          const creator =
+            notifySubmitTo !== actor.id ? await store.findById(notifySubmitTo) : null;
+          const recipients = creator ? [creator] : [];
+          if (creator) seen.add(creator.id);
+          recipients.push(...(await oversightRecipients(seen)));
+          await Promise.allSettled(
+            recipients.flatMap((r) => [
+              r.email &&
+                emailTaskSubmitted({
+                  to: r.email,
+                  creatorName: r.name,
+                  byName: actor.name,
+                  taskTitle: task.title,
+                  taskId: task.id,
+                }),
+              pushTaskSubmitted({
+                userId: r.id,
                 taskTitle: task.title,
                 byName: actor.name,
                 taskId: task.id,
               }),
-              pushTaskCompleted({
-                userId: creator.id,
+            ]).filter(Boolean)
+          );
+        }
+        if (notifyReturnTo) {
+          const u = await store.findById(notifyReturnTo.id);
+          if (u) {
+            await Promise.allSettled([
+              u.email &&
+                emailSubmissionReturned({
+                  to: u.email,
+                  assigneeName: u.name,
+                  byName: actor.name,
+                  taskTitle: task.title,
+                  taskId: task.id,
+                  reason: notifyReturnTo.reason,
+                }),
+              pushSubmissionReturned({
+                userId: u.id,
                 taskTitle: task.title,
                 byName: actor.name,
                 taskId: task.id,
               }),
             ]);
           }
+        }
+        if (notifyApprovedTo) {
+          const u = await store.findById(notifyApprovedTo);
+          if (u) {
+            await Promise.allSettled([
+              u.email &&
+                emailTaskApproved({
+                  to: u.email,
+                  assigneeName: u.name,
+                  byName: actor.name,
+                  taskTitle: task.title,
+                  taskId: task.id,
+                }),
+              pushTaskApproved({
+                userId: u.id,
+                taskTitle: task.title,
+                byName: actor.name,
+                taskId: task.id,
+              }),
+            ]);
+          }
+        }
+        if (completedNow) {
+          const seen = new Set([actor.id]);
+          const creator =
+            task.assignerId !== actor.id ? await store.findById(task.assignerId) : null;
+          const recipients = creator ? [creator] : [];
+          if (creator) seen.add(creator.id);
+          recipients.push(...(await oversightRecipients(seen)));
+          await Promise.allSettled(
+            recipients.flatMap((r) => [
+              r.email &&
+                emailTaskCompleted({
+                  to: r.email,
+                  creatorName: r.name,
+                  taskTitle: task.title,
+                  byName: actor.name,
+                  taskId: task.id,
+                }),
+              pushTaskCompleted({
+                userId: r.id,
+                taskTitle: task.title,
+                byName: actor.name,
+                taskId: task.id,
+              }),
+            ]).filter(Boolean)
+          );
         }
       } catch (err) {
         console.error("Task notification failed:", err);
@@ -1472,4 +1665,107 @@ export async function transitionTask(
   }
 
   return viewTask(actor, task);
+}
+
+// ── Delayed-task reminders ───────────────────────────────────────────
+// Daily sweep (see /api/cron/delayed-tasks): emails + pushes every open
+// assignee on a task or subtask that's now past its due date. Each
+// assignee/subtask stamps the IST day it was last reminded (via a targeted
+// array-element update, so it can't clobber an unrelated concurrent edit),
+// so re-running the sweep the same day never double-sends. Best-effort —
+// one bad doc doesn't abort the sweep.
+export async function sendDelayedTaskReminders() {
+  await connectToDatabase();
+  const today = todayDayKey();
+  const docs = await Task.find({ cancelled: false, dueDate: { $ne: null } })
+    .lean()
+    .exec();
+  // Subtasks can be overdue even on a task with no due date of its own, so
+  // also sweep every task that has at least one subtask with an expected date.
+  const withSubtasks = await Task.find({
+    cancelled: false,
+    dueDate: null,
+    "subtasks.0": { $exists: true },
+  })
+    .lean()
+    .exec();
+
+  let reminded = 0;
+  const errors = [];
+  for (const doc of [...docs, ...withSubtasks]) {
+    try {
+      const task = stripMongo(doc);
+      normalizeTask(task);
+
+      if (task.dueDate && deriveTaskStatus(task) === "delayed") {
+        const daysLate = Math.max(
+          1,
+          Math.ceil((Date.now() - new Date(task.dueDate).getTime()) / DAY_MS)
+        );
+        for (const a of task.assignees) {
+          if (a.status === "completed") continue;
+          if (a.lastDelayReminderDay === today) continue;
+          const u = await store.findById(a.id);
+          if (!u) continue;
+          await Promise.allSettled([
+            u.email &&
+              emailTaskDelayed({
+                to: u.email,
+                assigneeName: a.name,
+                taskTitle: task.title,
+                taskId: task.id,
+                daysLate,
+              }),
+            pushTaskDelayed({ userId: a.id, taskTitle: task.title, taskId: task.id }),
+          ]);
+          await Task.updateOne(
+            { id: task.id },
+            { $set: { "assignees.$[el].lastDelayReminderDay": today } },
+            { arrayFilters: [{ "el.id": a.id }] }
+          );
+          reminded++;
+        }
+      }
+
+      for (const s of task.subtasks || []) {
+        if (s.status === "done" || !s.expectedDate || !s.assigneeId) continue;
+        if (new Date(s.expectedDate).getTime() >= Date.now()) continue;
+        if (s.lastDelayReminderDay === today) continue;
+        const u = await store.findById(s.assigneeId);
+        if (!u) continue;
+        const daysLate = Math.max(
+          1,
+          Math.ceil((Date.now() - new Date(s.expectedDate).getTime()) / DAY_MS)
+        );
+        await Promise.allSettled([
+          u.email &&
+            emailSubtaskDelayed({
+              to: u.email,
+              assigneeName: s.assigneeName,
+              subtaskTitle: s.title,
+              taskTitle: task.title,
+              taskId: task.id,
+              subtaskKey: s.key,
+              daysLate,
+            }),
+          pushSubtaskDelayed({
+            userId: s.assigneeId,
+            subtaskTitle: s.title,
+            taskTitle: task.title,
+            taskId: task.id,
+            subtaskKey: s.key,
+          }),
+        ]);
+        await Task.updateOne(
+          { id: task.id },
+          { $set: { "subtasks.$[el].lastDelayReminderDay": today } },
+          { arrayFilters: [{ "el.id": s.id }] }
+        );
+        reminded++;
+      }
+    } catch (err) {
+      errors.push({ id: doc.id, error: err?.message || String(err) });
+    }
+  }
+  return { reminded, considered: docs.length + withSubtasks.length, errors };
 }

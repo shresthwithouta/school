@@ -2,6 +2,7 @@
 import {
   LayoutDashboard,
   ListChecks,
+  Repeat,
   CalendarClock,
   CalendarDays,
   FolderArchive,
@@ -33,6 +34,7 @@ export const NAV_SECTIONS = [
     items: [
       { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
       { title: "Tasks", href: "/tasks", icon: ListChecks },
+      { title: "Recurring", href: "/recurring", icon: Repeat },
       { title: "Meetings", href: "/meetings", icon: CalendarClock },
       { title: "Calendar", href: "/calendar", icon: CalendarDays },
       // Everyone has a Repository view — the Chairman sees all saved files and

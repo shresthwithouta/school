@@ -15,9 +15,16 @@ export const authConfig = {
   pages: {
     signIn: "/login",
   },
-  // Cap session lifetime to 8 hours (a working day). The jwt callback also
-  // re-syncs role/active status every few minutes for mid-session changes.
-  session: { strategy: "jwt", maxAge: 8 * 60 * 60 },
+  // Sessions persist for 30 days and roll forward on activity (re-issued once
+  // a day at most), so staying logged in doesn't require reauthenticating every
+  // few hours — important for the installed PWA/TWA, which has no separate
+  // "remember me" flow. The jwt callback still re-syncs role/active status
+  // every few minutes so a demotion/deactivation takes effect mid-session.
+  session: {
+    strategy: "jwt",
+    maxAge: 30 * 24 * 60 * 60,
+    updateAge: 24 * 60 * 60,
+  },
   callbacks: {
     // Runs in middleware for every matched request.
     authorized({ auth, request: { nextUrl } }) {

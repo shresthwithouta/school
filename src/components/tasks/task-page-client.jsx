@@ -16,7 +16,7 @@ import {
   ListTree,
   ClipboardList,
   UserPlus,
-  Paperclip,
+  ChevronDown,
   Send,
   Check,
   Undo2,
@@ -37,7 +37,14 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Table,
   TableBody,
@@ -59,7 +66,7 @@ import { SendBackDialog } from "@/components/tasks/send-back-dialog";
 import { UserCombobox } from "@/components/tasks/user-combobox";
 import { CommentThread } from "@/components/tasks/comment-thread";
 import { RichText } from "@/components/rich-text";
-import { AttachmentList, AttachmentUploader } from "@/components/attachments";
+import { AttachmentList } from "@/components/attachments";
 import { SUBTASK_STATUS_META } from "@/lib/task-meta";
 import {
   cn,
@@ -80,13 +87,18 @@ export function TaskPageClient({ task, assignees, currentUser }) {
   const [statusSending, setStatusSending] = useState(false);
   const [statusPending, startStatusTransition] = useTransition();
   const statusBusy = statusSending || statusPending;
+  // Description is collapsible (toggled via the chevron) so a long write-up
+  // doesn't push subtasks/comments below the fold.
+  const [descOpen, setDescOpen] = useState(true);
 
   const mine = task.assignees.find((a) => a.id === currentUser.id) ?? null;
   const isManager = currentUser.tier === "OWNER" || currentUser.tier === "ADMIN";
   // Only the Chairman (Owner tier) can save a file into the repository.
   const isChairman = currentUser.tier === "OWNER";
   const [savingId, setSavingId] = useState(null);
-  const canEdit = currentUser.id === task.assignerId;
+  // Only the creator (assigner) or a manager (Owner/Admin) may edit the task
+  // itself (title, description, priority, due date). Mirrors canEdit server-side.
+  const canEdit = currentUser.id === task.assignerId || isManager;
   // The creator can delete their own task; the Chairman/Director (Owner) can
   // delete any task. Mirrors canDeleteTask in lib/tasks.js.
   const canDelete = canEdit || currentUser.tier === "OWNER";
@@ -219,7 +231,7 @@ export function TaskPageClient({ task, assignees, currentUser }) {
 
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-2">
+        <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-sm text-muted-foreground">{task.key}</span>
             <StatusBadge status={task.status} />
@@ -232,6 +244,7 @@ export function TaskPageClient({ task, assignees, currentUser }) {
             )}
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">{task.title}</h1>
+          <AssigneeRow assignees={task.assignees} />
         </div>
 
         <div className="flex shrink-0 flex-wrap gap-2">
@@ -286,6 +299,232 @@ export function TaskPageClient({ task, assignees, currentUser }) {
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Main column */}
         <div className="space-y-6 lg:col-span-2">
+          {/* Description — collapsible so a long write-up doesn't bury the
+              subtasks/comments below it. Any general reference files added
+              while creating/editing the task show here, read-only. */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Description</CardTitle>
+              <CardAction>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7"
+                  onClick={() => setDescOpen((o) => !o)}
+                  title={descOpen ? "Collapse" : "Expand"}
+                >
+                  <ChevronDown
+                    className={cn("size-4 transition-transform", !descOpen && "-rotate-90")}
+                  />
+                </Button>
+              </CardAction>
+            </CardHeader>
+            {descOpen && (
+              <CardContent className="space-y-4">
+                {task.description ? (
+                  <RichText html={task.description} className="text-muted-foreground" />
+                ) : (
+                  <p className="text-sm text-muted-foreground">No description.</p>
+                )}
+                {task.attachments.length > 0 && (
+                  <div className="space-y-2 border-t pt-3">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Files ({task.attachments.length})
+                    </p>
+                    <AttachmentList
+                      attachments={task.attachments}
+                      onRemove={(attId) =>
+                        api(
+                          `/api/tasks/${task.id}/attachments/${attId}`,
+                          "DELETE",
+                          undefined,
+                          "att-del"
+                        )
+                      }
+                      canRemove={(a) => a.uploadedById === currentUser.id || canEdit}
+                      onSave={isChairman ? saveToRepo : undefined}
+                      savingId={savingId}
+                    />
+                  </div>
+                )}
+              </CardContent>
+            )}
+          </Card>
+
+          {/* Subtasks */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ListTree className="size-4" />
+                Subtasks
+                {task.subtasks.length > 0 && (
+                  <span className="text-sm font-normal text-muted-foreground">
+                    {doneSubs}/{task.subtasks.length} done
+                  </span>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {task.subtasks.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  No subtasks. Break this task down into smaller pieces.
+                </p>
+              )}
+              {task.subtasks.length > 0 && (
+                <div className="overflow-hidden rounded-lg border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/40 hover:bg-muted/40">
+                        <TableHead>Subtask</TableHead>
+                        <TableHead>Assignee</TableHead>
+                        <TableHead>Priority</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Expected</TableHead>
+                        {involved && (
+                          <TableHead className="w-10 text-right">Edit</TableHead>
+                        )}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {task.subtasks.map((s) => {
+                        const desc = toPlainText(s.description || "");
+                        return (
+                          <TableRow key={s.id}>
+                            <TableCell className="max-w-[20rem] whitespace-normal align-top">
+                              <Link
+                                href={`/tasks/${task.key}/${s.key}`}
+                                className="group/st block"
+                              >
+                                <span className="flex items-center gap-2">
+                                  <span className="font-mono text-[11px] text-muted-foreground">
+                                    {s.key}
+                                  </span>
+                                  <span
+                                    className={cn(
+                                      "text-sm font-medium group-hover/st:underline",
+                                      s.status === "done" &&
+                                        "text-muted-foreground line-through"
+                                    )}
+                                  >
+                                    {s.title}
+                                  </span>
+                                </span>
+                                {desc && (
+                                  <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                                    {desc}
+                                  </span>
+                                )}
+                              </Link>
+                            </TableCell>
+                            <TableCell className="align-top">
+                              {s.assigneeName ? (
+                                <span className="inline-flex items-center gap-1.5">
+                                  <Avatar className="size-5">
+                                    <AvatarFallback className="bg-primary/10 text-[9px] text-primary">
+                                      {getInitials(s.assigneeName)}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <span className="text-sm">{s.assigneeName}</span>
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">
+                                  Unassigned
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell className="align-top">
+                              <PriorityBadge priority={s.priority || "medium"} />
+                            </TableCell>
+                            <TableCell className="align-top">
+                              <Badge
+                                variant="outline"
+                                className={SUBTASK_STATUS_META[s.status].badgeClass}
+                              >
+                                {SUBTASK_STATUS_META[s.status].label}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="align-top">
+                              {s.expectedDate ? (
+                                <span
+                                  className={cn(
+                                    "text-sm",
+                                    s.overdue &&
+                                      "font-medium text-rose-600 dark:text-rose-400"
+                                  )}
+                                >
+                                  {formatDate(s.expectedDate)}
+                                  {s.overdue && (
+                                    <span className="block text-[10px] font-medium">
+                                      overdue
+                                    </span>
+                                  )}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            {involved && (
+                              <TableCell className="align-top text-right">
+                                <SubtaskDialog
+                                  task={{ id: task.id, key: task.key }}
+                                  sub={s}
+                                  assignees={assignees}
+                                  currentUserId={currentUser.id}
+                                  canEditDate={
+                                    isManager ||
+                                    currentUser.id === (s.createdById || task.assignerId)
+                                  }
+                                  trigger={
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      title="Edit subtask"
+                                      className="size-8 text-muted-foreground hover:text-foreground"
+                                    >
+                                      <Pencil className="size-4" />
+                                    </Button>
+                                  }
+                                />
+                              </TableCell>
+                            )}
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              {involved && (
+                <Button asChild variant="outline" className="w-full">
+                  <Link href={`/tasks/${task.key}/subtasks/new`}>
+                    <Plus className="size-4" />
+                    New subtask
+                  </Link>
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Comments */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <MessageSquare className="size-4" />
+                Comments
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CommentThread
+                taskId={task.id}
+                comments={task.comments}
+                participants={participants}
+                currentUser={currentUser}
+                isCreator={canEdit}
+              />
+            </CardContent>
+          </Card>
+
           {/* Summary — every key detail of the task at a glance, in one table. */}
           <Card>
             <CardHeader>
@@ -421,226 +660,6 @@ export function TaskPageClient({ task, assignees, currentUser }) {
                   </TableBody>
                 </Table>
               </div>
-            </CardContent>
-          </Card>
-
-          {/* Description */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Description</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {task.description ? (
-                <RichText html={task.description} className="text-muted-foreground" />
-              ) : (
-                <p className="text-sm text-muted-foreground">No description.</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Subtasks */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <ListTree className="size-4" />
-                Subtasks
-                {task.subtasks.length > 0 && (
-                  <span className="text-sm font-normal text-muted-foreground">
-                    {doneSubs}/{task.subtasks.length} done
-                  </span>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {task.subtasks.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  No subtasks. Break this task down into smaller pieces.
-                </p>
-              )}
-              {task.subtasks.length > 0 && (
-                <div className="overflow-hidden rounded-lg border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-muted/40 hover:bg-muted/40">
-                        <TableHead>Subtask</TableHead>
-                        <TableHead>Assignee</TableHead>
-                        <TableHead>Priority</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Expected</TableHead>
-                        {involved && (
-                          <TableHead className="w-10 text-right">Edit</TableHead>
-                        )}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {task.subtasks.map((s) => {
-                        const desc = toPlainText(s.description || "");
-                        return (
-                          <TableRow key={s.id}>
-                            <TableCell className="max-w-[20rem] whitespace-normal align-top">
-                              <Link
-                                href={`/tasks/${task.key}/${s.key}`}
-                                className="group/st block"
-                              >
-                                <span className="flex items-center gap-2">
-                                  <span className="font-mono text-[11px] text-muted-foreground">
-                                    {s.key}
-                                  </span>
-                                  <span
-                                    className={cn(
-                                      "text-sm font-medium group-hover/st:underline",
-                                      s.status === "done" &&
-                                        "text-muted-foreground line-through"
-                                    )}
-                                  >
-                                    {s.title}
-                                  </span>
-                                </span>
-                                {desc && (
-                                  <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                                    {desc}
-                                  </span>
-                                )}
-                              </Link>
-                            </TableCell>
-                            <TableCell className="align-top">
-                              {s.assigneeName ? (
-                                <span className="inline-flex items-center gap-1.5">
-                                  <Avatar className="size-5">
-                                    <AvatarFallback className="bg-primary/10 text-[9px] text-primary">
-                                      {getInitials(s.assigneeName)}
-                                    </AvatarFallback>
-                                  </Avatar>
-                                  <span className="text-sm">{s.assigneeName}</span>
-                                </span>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">
-                                  Unassigned
-                                </span>
-                              )}
-                            </TableCell>
-                            <TableCell className="align-top">
-                              <PriorityBadge priority={s.priority || "medium"} />
-                            </TableCell>
-                            <TableCell className="align-top">
-                              <Badge
-                                variant="outline"
-                                className={SUBTASK_STATUS_META[s.status].badgeClass}
-                              >
-                                {SUBTASK_STATUS_META[s.status].label}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="align-top">
-                              {s.expectedDate ? (
-                                <span
-                                  className={cn(
-                                    "text-sm",
-                                    s.overdue &&
-                                      "font-medium text-rose-600 dark:text-rose-400"
-                                  )}
-                                >
-                                  {formatDate(s.expectedDate)}
-                                  {s.overdue && (
-                                    <span className="block text-[10px] font-medium">
-                                      overdue
-                                    </span>
-                                  )}
-                                </span>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">—</span>
-                              )}
-                            </TableCell>
-                            {involved && (
-                              <TableCell className="align-top text-right">
-                                <SubtaskDialog
-                                  task={{ id: task.id, key: task.key }}
-                                  sub={s}
-                                  assignees={assignees}
-                                  currentUserId={currentUser.id}
-                                  trigger={
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      title="Edit subtask"
-                                      className="size-8 text-muted-foreground hover:text-foreground"
-                                    >
-                                      <Pencil className="size-4" />
-                                    </Button>
-                                  }
-                                />
-                              </TableCell>
-                            )}
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-
-              {involved && (
-                <Button asChild variant="outline" className="w-full">
-                  <Link href={`/tasks/${task.key}/subtasks/new`}>
-                    <Plus className="size-4" />
-                    New subtask
-                  </Link>
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Attachments */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Paperclip className="size-4" />
-                Attachments
-                {task.attachments.length > 0 && (
-                  <span className="text-sm font-normal text-muted-foreground">
-                    {task.attachments.length}
-                  </span>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <AttachmentList
-                attachments={task.attachments}
-                onRemove={(attId) =>
-                  api(
-                    `/api/tasks/${task.id}/attachments/${attId}`,
-                    "DELETE",
-                    undefined,
-                    "att-del"
-                  )
-                }
-                canRemove={(a) => a.uploadedById === currentUser.id || canEdit}
-                onSave={isChairman ? saveToRepo : undefined}
-                savingId={savingId}
-              />
-              <AttachmentUploader
-                onAdd={(a) =>
-                  api(`/api/tasks/${task.id}/attachments`, "POST", a, "att-add")
-                }
-              />
-            </CardContent>
-          </Card>
-
-          {/* Comments */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <MessageSquare className="size-4" />
-                Comments
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CommentThread
-                taskId={task.id}
-                comments={task.comments}
-                participants={participants}
-                currentUser={currentUser}
-                isCreator={canEdit}
-              />
             </CardContent>
           </Card>
         </div>
@@ -809,34 +828,101 @@ export function TaskPageClient({ task, assignees, currentUser }) {
               )}
             </CardContent>
           </Card>
-
-          {/* Activity */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <History className="size-4" />
-                Activity
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ol className="space-y-3 border-l pl-4">
-                {[...task.activity].reverse().map((a) => (
-                  <li key={a.id} className="relative">
-                    <span className="absolute -left-5.25 top-1.5 size-2 rounded-full bg-primary" />
-                    <p className="text-sm">
-                      <span className="font-medium">{a.actorName}</span>{" "}
-                      <span className="text-muted-foreground">{a.message}</span>
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatDateTime(a.createdAt)}
-                    </p>
-                  </li>
-                ))}
-              </ol>
-            </CardContent>
-          </Card>
         </div>
       </div>
+
+      {/* Activity — full-width at the very bottom, on both mobile and desktop. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <History className="size-4" />
+            Activity
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ol className="space-y-3 border-l pl-4">
+            {[...task.activity].reverse().map((a) => (
+              <li key={a.id} className="relative">
+                <span className="absolute -left-5.25 top-1.5 size-2 rounded-full bg-primary" />
+                <p className="text-sm">
+                  <span className="font-medium">{a.actorName}</span>{" "}
+                  <span className="text-muted-foreground">{a.message}</span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {formatDateTime(a.createdAt)}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// Compact single-row assignee glance under the task title: first two people by
+// name, the rest folded into a "+N more" popover so the header never wraps
+// into multiple lines. Full management (add/remove/approve) stays in the
+// sidebar Assignees card — this is read-only.
+function AssigneeRow({ assignees }) {
+  if (assignees.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">Draft — no one assigned yet</p>
+    );
+  }
+  const shown = assignees.slice(0, 2);
+  const rest = assignees.slice(2);
+  return (
+    <div className="flex flex-nowrap items-center gap-1.5 overflow-hidden text-sm">
+      <span className="shrink-0 text-muted-foreground">Assigned to</span>
+      {shown.map((a) => (
+        <span
+          key={a.id}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border bg-muted/40 px-2 py-0.5 text-xs"
+        >
+          <Avatar className="size-4">
+            <AvatarFallback className="bg-primary/10 text-[9px] text-primary">
+              {getInitials(a.name)}
+            </AvatarFallback>
+          </Avatar>
+          {a.name}
+          {a.status === "completed" && (
+            <CheckCircle2 className="size-3 text-emerald-500" />
+          )}
+        </span>
+      ))}
+      {rest.length > 0 && (
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="shrink-0 rounded-full border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              +{rest.length} more
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-64" align="start">
+            <p className="mb-2 text-xs font-medium text-muted-foreground">
+              All assignees ({assignees.length})
+            </p>
+            <ul className="space-y-1.5">
+              {assignees.map((a) => (
+                <li key={a.id} className="flex items-center gap-2 text-sm">
+                  <Avatar className="size-5">
+                    <AvatarFallback className="bg-primary/10 text-[9px] text-primary">
+                      {getInitials(a.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="min-w-0 flex-1 truncate">{a.name}</span>
+                  {a.status === "completed" && (
+                    <CheckCircle2 className="size-3.5 shrink-0 text-emerald-500" />
+                  )}
+                </li>
+              ))}
+            </ul>
+          </PopoverContent>
+        </Popover>
+      )}
     </div>
   );
 }
