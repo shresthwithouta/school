@@ -76,6 +76,8 @@ import {
 import { canManage, canManageTarget, isOwner } from "@/lib/rbac";
 import { cn, getInitials, formatDateTime } from "@/lib/utils";
 
+const ACTIVITY_PAGE_SIZE = 6;
+
 // Client mirror of the server's entry-visibility rule (lib/recurring). Lets the
 // grid show a row only for people whose uploads this viewer may actually see.
 function canSeeAssignee(user, r, assignee) {
@@ -116,6 +118,7 @@ export function RecurringDetailClient({ recurring, assignees, currentUser }) {
   const router = useRouter();
   const [r, setR] = useState(recurring);
   const [busy, setBusy] = useState(false);
+  const [showAllActivity, setShowAllActivity] = useState(false);
 
   const today = todayDayKey();
   const startKey = dayKeyOf(r.startDate) || today;
@@ -349,14 +352,30 @@ export function RecurringDetailClient({ recurring, assignees, currentUser }) {
           <CardContent className="space-y-2">
             <h2 className="text-sm font-semibold">Activity</h2>
             <ul className="space-y-1.5">
-              {[...r.activity].reverse().slice(0, 30).map((a) => (
-                <li key={a.id} className="flex items-baseline gap-2 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">{a.actorName}</span>
-                  <span>{a.message}</span>
-                  <span className="ml-auto whitespace-nowrap">{formatDateTime(a.createdAt)}</span>
-                </li>
-              ))}
+              {(() => {
+                const allActivity = [...r.activity].reverse();
+                const visible = showAllActivity
+                  ? allActivity
+                  : allActivity.slice(0, ACTIVITY_PAGE_SIZE);
+                return visible.map((a) => (
+                  <li key={a.id} className="flex items-baseline gap-2 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">{a.actorName}</span>
+                    <span>{a.message}</span>
+                    <span className="ml-auto whitespace-nowrap">{formatDateTime(a.createdAt)}</span>
+                  </li>
+                ));
+              })()}
             </ul>
+            {r.activity.length > ACTIVITY_PAGE_SIZE && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground"
+                onClick={() => setShowAllActivity((v) => !v)}
+              >
+                {showAllActivity ? "Show less" : `See all activity (${r.activity.length})`}
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}

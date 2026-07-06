@@ -13,7 +13,6 @@ import {
   GitBranch,
   Plus,
   Repeat,
-  History,
 } from "lucide-react";
 
 import { requireUser } from "@/lib/session";
@@ -26,6 +25,7 @@ import { isDueOn, dayKeyOf, todayDayKey } from "@/lib/recurring-schedule";
 import { cn, formatDate, formatDateTime, getInitials } from "@/lib/utils";
 
 import { PendingDecisions } from "@/components/dashboard/pending-decisions";
+import { RecentActivityList } from "@/components/dashboard/recent-activity-list";
 import { TierBadge } from "@/components/role-badge";
 import { StatusBadge, PriorityBadge } from "@/components/tasks/task-badges";
 import { SUBTASK_STATUS_META } from "@/lib/task-meta";
@@ -175,7 +175,7 @@ export default async function DashboardPage() {
         .map((a) => ({ ...a, taskKeyRef: t.key, taskTitle: t.title }))
     )
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
-    .slice(0, 8);
+    .slice(0, 20);
 
   // Tasks this viewer created — shown on every dashboard regardless of role,
   // distinct from "my tasks" (assigned to me) and, for the Chairman, distinct
@@ -483,32 +483,7 @@ export default async function DashboardPage() {
         <CardDescription>Latest submissions, approvals and reviews</CardDescription>
       </CardHeader>
       <CardContent>
-        {recentActivity.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nothing has happened recently.</p>
-        ) : (
-          <ul className="divide-y">
-            {recentActivity.map((a) => (
-              <li key={a.id}>
-                <Link
-                  href={`/tasks/${a.taskKeyRef}`}
-                  className="-mx-2 flex items-start gap-3 rounded-md px-2 py-2.5 transition-colors hover:bg-accent/40"
-                >
-                  <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                    <History className="size-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm">
-                      <span className="font-medium">{a.actorName}</span> {a.message}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {a.taskKeyRef} · {a.taskTitle} · {formatDateTime(a.createdAt)}
-                    </p>
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
+        <RecentActivityList activity={recentActivity} />
       </CardContent>
     </Card>
   );

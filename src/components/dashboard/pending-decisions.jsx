@@ -6,9 +6,12 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Square, Loader2 } from "lucide-react";
 
+const PAGE_SIZE = 6;
+
 export function PendingDecisions({ decisions }) {
   const router = useRouter();
   const [busy, setBusy] = useState(null);
+  const [showAll, setShowAll] = useState(false);
 
   async function markDone(d) {
     setBusy(d.decisionId);
@@ -37,9 +40,11 @@ export function PendingDecisions({ decisions }) {
     );
   }
 
+  const visible = showAll ? decisions : decisions.slice(0, PAGE_SIZE);
+
   return (
     <ul className="space-y-1.5">
-      {decisions.map((d) => (
+      {visible.map((d) => (
         <li
           key={d.decisionId}
           className="flex items-start gap-2 rounded-lg border p-2.5"
@@ -81,6 +86,17 @@ export function PendingDecisions({ decisions }) {
           </div>
         </li>
       ))}
+      {decisions.length > PAGE_SIZE && (
+        <li>
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="mt-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+          >
+            {showAll ? "Show less" : `See all (${decisions.length})`}
+          </button>
+        </li>
+      )}
     </ul>
   );
 }

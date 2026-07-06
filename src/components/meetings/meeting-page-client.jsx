@@ -55,6 +55,8 @@ import { cn, formatDateTime, getInitials } from "@/lib/utils";
 
 
 
+const LIST_PAGE_SIZE = 6;
+
 export function MeetingPageClient({
   meeting,
   people,
@@ -72,6 +74,10 @@ export function MeetingPageClient({
   const [summary, setSummary] = useState("");
   const [decision, setDecision] = useState("");
   const [decisionDate, setDecisionDate] = useState("");
+  // Decisions/messages can pile up over a long-running meeting — collapsed to
+  // the most recent entries by default, expandable via "See all".
+  const [showAllDecisions, setShowAllDecisions] = useState(false);
+  const [showAllMessages, setShowAllMessages] = useState(false);
 
   const organizer =
     currentUser.id === meeting.createdById || currentUser.tier === "OWNER";
@@ -330,7 +336,10 @@ export function MeetingPageClient({
                 </p>
               ) : (
                 <ul className="space-y-1.5">
-                  {meeting.decisions.map((d) => {
+                  {(showAllDecisions
+                    ? meeting.decisions
+                    : meeting.decisions.slice(0, LIST_PAGE_SIZE)
+                  ).map((d) => {
                     const overdue = d.overdue;
                     return (
                       <li key={d.id} className="flex items-start gap-2 rounded-lg border p-2.5">
@@ -397,6 +406,18 @@ export function MeetingPageClient({
                   })}
                 </ul>
               )}
+              {meeting.decisions.length > LIST_PAGE_SIZE && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-2 text-muted-foreground"
+                  onClick={() => setShowAllDecisions((v) => !v)}
+                >
+                  {showAllDecisions
+                    ? "Show less"
+                    : `See all (${meeting.decisions.length})`}
+                </Button>
+              )}
             </CardContent>
           </Card>
 
@@ -417,7 +438,10 @@ export function MeetingPageClient({
                 <p className="text-sm text-muted-foreground">No messages yet.</p>
               ) : (
                 <ul className="space-y-3">
-                  {meeting.messages.map((m) => (
+                  {(showAllMessages
+                    ? meeting.messages
+                    : meeting.messages.slice(-LIST_PAGE_SIZE)
+                  ).map((m) => (
                     <li key={m.id} className="flex gap-3">
                       <Avatar className="size-7 shrink-0">
                         <AvatarFallback className="bg-primary/10 text-xs text-primary">
@@ -441,6 +465,18 @@ export function MeetingPageClient({
                     </li>
                   ))}
                 </ul>
+              )}
+              {meeting.messages.length > LIST_PAGE_SIZE && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground"
+                  onClick={() => setShowAllMessages((v) => !v)}
+                >
+                  {showAllMessages
+                    ? "Show less"
+                    : `See all messages (${meeting.messages.length})`}
+                </Button>
               )}
 
               {!completed && (

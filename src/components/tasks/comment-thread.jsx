@@ -15,6 +15,9 @@ import { cn, formatDateTime, getInitials, toPlainText } from "@/lib/utils";
 const MAX_INDENT = 4;
 // A comment that mentions someone must be a real message (matches the server).
 const MENTION_MIN_CHARS = 50;
+// Top-level comment threads are collapsed to the most recent entries by
+// default, expandable via "See all" — a long-lived task can pick up dozens.
+const ROOT_PAGE_SIZE = 6;
 
 function PendingAtts({ items, onRemove }) {
   if (items.length === 0) return null;
@@ -259,6 +262,7 @@ export function CommentThread({
   const router = useRouter();
   const [busy, setBusy] = useState(null);
   const [replyTo, setReplyTo] = useState(null);
+  const [showAllRoots, setShowAllRoots] = useState(false);
 
   const nameOf = useMemo(
     () => new Map(participants.map((p) => [p.id, p.name])),
@@ -334,7 +338,7 @@ export function CommentThread({
         <p className="text-sm text-muted-foreground">No comments yet.</p>
       ) : (
         <div className="space-y-3">
-          {roots.map((c) => (
+          {(showAllRoots ? roots : roots.slice(-ROOT_PAGE_SIZE)).map((c) => (
             <CommentNode
               key={c.id}
               comment={c}
@@ -343,6 +347,16 @@ export function CommentThread({
               ctx={ctx}
             />
           ))}
+          {roots.length > ROOT_PAGE_SIZE && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              onClick={() => setShowAllRoots((v) => !v)}
+            >
+              {showAllRoots ? "Show less" : `See all comments (${roots.length})`}
+            </Button>
+          )}
         </div>
       )}
 
