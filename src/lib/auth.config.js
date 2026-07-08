@@ -1,4 +1,4 @@
-
+import { NextResponse } from "next/server";
 
 /**
  * Edge-safe Auth.js configuration.
@@ -40,7 +40,16 @@ export const authConfig = {
       }
 
       // Everything else requires authentication.
-      return isLoggedIn;
+      if (isLoggedIn) return true;
+
+      // Rewrite in place instead of an HTTP redirect. The PWA's start_url is
+      // "/dashboard" — on a cold launch with no/expired session, a 3xx here
+      // is the first thing Chrome's installed-app window sees, and it briefly
+      // shows the address bar (with the site's domain + a close button) over
+      // the standalone app as a phishing safeguard before settling into
+      // chromeless mode. A same-URL rewrite renders the login page without
+      // ever sending a redirect, so the launch stays chromeless.
+      return NextResponse.rewrite(new URL("/login", nextUrl));
     },
   },
   providers: [],
