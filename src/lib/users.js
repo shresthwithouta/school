@@ -167,7 +167,10 @@ export async function createUser(
     throw new AppError("A user with that email already exists.", 409);
   }
 
-  const passwordHash = await bcrypt.hash(input.password, 10);
+  // No password set by the creator? Default it to the member's own email —
+  // memorable enough to hand over verbally, and mustChangePassword nudges
+  // them to pick their own on first sign-in.
+  const passwordHash = await bcrypt.hash(input.password || email, 10);
   const created = await store.create({
     name: input.name.trim(),
     email,

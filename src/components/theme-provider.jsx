@@ -30,13 +30,18 @@ function readStoredTheme() {
 }
 
 export function ThemeProvider({ children }) {
-  const [theme, setThemeState] = useState(readStoredTheme);
+  // Always seed with DEFAULT_THEME (not readStoredTheme) so the client's
+  // first render matches the server's — reading localStorage here would
+  // let this differ from the server on hydration and trigger a mismatch.
+  const [theme, setThemeState] = useState(DEFAULT_THEME);
 
-  // The inline <head> script already applied the right class before paint;
-  // this just keeps it in sync (a no-op in the common case).
+  // The inline <head> script already applied the right class before paint
+  // (avoids a visual flash); this syncs React state to the real stored
+  // theme after hydration completes.
   useEffect(() => {
-    applyTheme(theme);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const stored = readStoredTheme();
+    setThemeState(stored);
+    applyTheme(stored);
   }, []);
 
   const setTheme = useCallback((next) => {

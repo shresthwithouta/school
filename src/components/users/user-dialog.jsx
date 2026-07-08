@@ -134,7 +134,7 @@ export function UserDialog({
           </DialogTitle>
           <DialogDescription>
             {mode === "create"
-              ? "Create an account. The member signs in with the email and password you set."
+              ? "Create an account. Leave the password blank to default it to the member's email — they'll be asked to change it on first sign-in."
               : "Update this member's details and access."}
           </DialogDescription>
         </DialogHeader>
@@ -169,12 +169,17 @@ export function UserDialog({
                 <Input
                   id="password"
                   type="text"
+                  placeholder="Blank = their email"
                   {...register("password")}
                   aria-invalid={!!errors.password}
                 />
-                {errors.password && (
+                {errors.password ? (
                   <p className="text-sm text-destructive">
                     {errors.password.message}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Leave blank to default to their email address.
                   </p>
                 )}
               </div>

@@ -10,7 +10,14 @@ const optionalText = (max) =>
 export const createUserSchema = z.object({
   name: z.string().trim().min(2, "Name is too short").max(80),
   email: z.string().trim().toLowerCase().email("Enter a valid email"),
-  password: z.string().min(8, "Password must be at least 8 characters").max(100),
+  // Optional: leave blank to default the login password to the member's own
+  // email address (see createUser in lib/users.js).
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters")
+    .max(100)
+    .optional()
+    .or(z.literal("")),
   role: roleEnum,
   department: optionalText(80),
   phone: optionalText(30),
