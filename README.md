@@ -7,7 +7,7 @@ Teachers and Team Members. Built with a role-based visibility hierarchy
 Built so far: authentication + role hierarchy, dashboards, team management, profiles
 with photo upload, a full **Tasks** module (multi-assignee lifecycle, subtasks, rich
 text, threaded replies, file/voice attachments, Timeliness/Quality/Accuracy
-evaluation, audit log), **Analytics**, **Meetings** (with attendance + minutes),
+evaluation, audit log), **Analytics**, **Meetings** (with attendance minutes),
 **file/voice uploads** (Cloudinary) and  **email notifications** (Resend). Events,
 calendar, approvals  and the AI features are still coming soon
 
