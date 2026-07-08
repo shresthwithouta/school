@@ -383,8 +383,8 @@ function activity(actor, message) {
 }
 
 // ── Visibility & permissions ───────────────────────────────────────
-// Chairman/Director, Principal and Manager (the management tiers) can see
-// every task across the school. Everyone else sees only tasks they created,
+// Admin and Manager (the management tiers) can see every task across the
+// school. Everyone else sees only tasks they created,
 // are assigned to, or are assigned a subtask of — a subtask assignee can open
 // the parent task (the subtask URL is /<task>/<subtask>) to do their part.
 function canSeeTask(actor, task) {
@@ -421,7 +421,7 @@ function canEdit(actor, task) {
 }
 
 // Deletion is broader than editing: the creator can delete their own task, and
-// the Chairman/Director (Owner) can delete ANY task for oversight/cleanup.
+// the Admin (Owner tier) can delete ANY task for oversight/cleanup.
 function canDeleteTask(actor, task) {
   return canEdit(actor, task) || isOwner(actor.role);
 }

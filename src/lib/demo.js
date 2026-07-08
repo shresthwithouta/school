@@ -4,20 +4,20 @@
  */
 export const DEMO_ACCOUNTS = [
   {
-    name: "School Owner",
+    name: "School Admin",
     email: "owner@school.edu",
     password: "owner123",
-    role: "Chairman/Director",
+    role: "Admin",
     department: "Management",
-    tierLabel: "Owner",
+    tierLabel: "Owner tier",
   },
   {
-    name: "Priya Principal",
+    name: "Manoj Manager",
     email: "admin@school.edu",
     password: "admin123",
-    role: "Principal",
+    role: "Manager",
     department: "Administration",
-    tierLabel: "Admin",
+    tierLabel: "Admin tier",
   },
   {
     name: "Tina Teacher",
@@ -25,6 +25,6 @@ export const DEMO_ACCOUNTS = [
     password: "worker123",
     role: "Teacher",
     department: "Science",
-    tierLabel: "Worker",
+    tierLabel: "Worker tier",
   },
 ] ;

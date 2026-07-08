@@ -180,7 +180,7 @@ export default async function DashboardPage() {
     .slice(0, 20);
 
   // Tasks this viewer created — shown on every dashboard regardless of role,
-  // distinct from "my tasks" (assigned to me) and, for the Chairman, distinct
+  // distinct from "my tasks" (assigned to me) and, for the Admin, distinct
   // from the org-wide pending list.
   const createdByMe = tasks
     .filter((t) => t.assignerId === user.id)
@@ -204,7 +204,7 @@ export default async function DashboardPage() {
   // for them, not just tasks they created. Task-level submissions (per
   // assignee) and subtask-level submissions are both surfaced here since both
   // go through the same approve/send-back flow. Shown on every management
-  // dashboard (Chairman included) with its own empty state, same as the other
+  // dashboard (Admin included) with its own empty state, same as the other
   // review-focused cards.
   const pendingApprovalTasks = manage
     ? tasks
@@ -592,7 +592,7 @@ export default async function DashboardPage() {
     </Card>
   );
 
-  // ── Chairman / Director: clean, org-wide overview ──────────────────
+  // ── Admin: clean, org-wide overview ─────────────────────────────────
   if (chair) {
     const pending = tasks
       .filter((t) => ["assigned", "in_progress", "delayed"].includes(t.status))
@@ -675,7 +675,7 @@ export default async function DashboardPage() {
           </Card>
 
           {/* Side column: split into two sections — approvals waiting on the
-              Chairman, then recently completed work — instead of one card
+              Admin, then recently completed work — instead of one card
               stretched to match the pending-tasks list's height. */}
           <div className="flex flex-col gap-6">
             {approvalsCard}

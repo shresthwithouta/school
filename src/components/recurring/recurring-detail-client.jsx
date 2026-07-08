@@ -18,6 +18,8 @@ import {
   Send,
   Clock,
   History,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -72,6 +74,8 @@ import {
   dayKeyOf,
   todayDayKey,
   formatDayKey,
+  weekdayOf,
+  WEEKDAYS,
 } from "@/lib/recurring-schedule";
 import { canManage, canManageTarget, isOwner } from "@/lib/rbac";
 import { getInitials, formatDateTime } from "@/lib/utils";
@@ -119,7 +123,6 @@ export function RecurringDetailClient({ recurring, assignees, currentUser }) {
   const [r, setR] = useState(recurring);
   const [busy, setBusy] = useState(false);
   const [showAllActivity, setShowAllActivity] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
 
   const today = todayDayKey();
   const startKey = dayKeyOf(r.startDate) || today;
@@ -272,24 +275,17 @@ export function RecurringDetailClient({ recurring, assignees, currentUser }) {
         />
       )}
 
-      {/* Daily log summary — today's status per person, with a link out to full history */}
+      {/* Daily log summary — today's status per person, plus a calendar for any other day */}
       <Card>
         <CardContent className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <History className="size-4 text-muted-foreground" />
-              <h2 className="text-sm font-semibold">Daily log</h2>
-              <span className="text-xs text-muted-foreground">
-                {rows.length === 1 && rows[0].id === currentUser.id
-                  ? "your uploads"
-                  : `${rows.length} ${rows.length === 1 ? "person" : "people"}`}
-              </span>
-            </div>
-            {days.length > 0 && (
-              <Button variant="outline" size="sm" onClick={() => setHistoryOpen(true)}>
-                See all responses
-              </Button>
-            )}
+          <div className="flex items-center gap-2">
+            <History className="size-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold">Daily log</h2>
+            <span className="text-xs text-muted-foreground">
+              {rows.length === 1 && rows[0].id === currentUser.id
+                ? "your uploads"
+                : `${rows.length} ${rows.length === 1 ? "person" : "people"}`}
+            </span>
           </div>
 
           {rows.length === 0 ? (
@@ -338,101 +334,26 @@ export function RecurringDetailClient({ recurring, assignees, currentUser }) {
               })}
             </ul>
           )}
+
+          {rows.length > 0 && days.length > 0 && (
+            <div className="border-t pt-3">
+              <CalendarHistory
+                r={r}
+                rows={rows}
+                days={days}
+                entryMap={entryMap}
+                today={today}
+                startKey={startKey}
+                endKey={endKey}
+                currentUser={currentUser}
+                setViewEntry={setViewEntry}
+                removeEntry={removeEntry}
+                deletingEntryId={deletingEntryId}
+              />
+            </div>
+          )}
         </CardContent>
       </Card>
-
-      {/* Full history — every scheduled day, in a scrollable window instead of a wide grid */}
-      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>All responses</DialogTitle>
-            <DialogDescription>Every scheduled day, most recent first</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            {days.map((d) => (
-              <div key={d}>
-                <div className="mb-1.5 flex items-center gap-2">
-                  <p className="text-sm font-semibold">{formatDayKey(d)}</p>
-                  {d === today && (
-                    <Badge variant="outline" className="text-[10px]">
-                      Today
-                    </Badge>
-                  )}
-                </div>
-                <ul className="divide-y rounded-lg border">
-                  {rows.map((a) => {
-                    const e = entryMap.get(`${a.id}::${d}`);
-                    const past = d < today;
-                    const canDelete = e && r.canEdit;
-                    return (
-                      <li key={a.id} className="flex items-center gap-3 px-3 py-2">
-                        <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-medium text-primary">
-                          {getInitials(a.name)}
-                        </span>
-                        <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                          {a.name}
-                          {a.id === currentUser.id ? " (you)" : ""}
-                        </span>
-                        {e ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setViewEntry(e);
-                                setHistoryOpen(false);
-                              }}
-                              className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-600 transition-colors hover:bg-emerald-500/25 dark:text-emerald-400"
-                            >
-                              <Check className="size-3" /> View
-                            </button>
-                            {canDelete && (
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <button
-                                    type="button"
-                                    title="Delete this response"
-                                    disabled={deletingEntryId === e.id}
-                                    className="inline-flex items-center justify-center rounded-full p-1 text-muted-foreground transition-colors hover:bg-rose-500/10 hover:text-rose-600 disabled:opacity-50 dark:hover:text-rose-400"
-                                  >
-                                    {deletingEntryId === e.id ? (
-                                      <Loader2 className="size-3.5 animate-spin" />
-                                    ) : (
-                                      <Trash2 className="size-3.5" />
-                                    )}
-                                  </button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                  <AlertDialogHeader>
-                                    <AlertDialogTitle>Delete this response?</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                      Removes {a.name}&apos;s result for {formatDayKey(d)},
-                                      including any attached files. This can&apos;t be undone.
-                                    </AlertDialogDescription>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction onClick={() => removeEntry(e)}>
-                                      Delete
-                                    </AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
-                            )}
-                          </>
-                        ) : past ? (
-                          <span className="text-[11px] text-rose-500">Missed</span>
-                        ) : (
-                          <span className="text-[11px] text-muted-foreground">Awaiting</span>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Activity */}
       {r.activity?.length > 0 && (
@@ -489,6 +410,231 @@ export function RecurringDetailClient({ recurring, assignees, currentUser }) {
           )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ── Calendar picker for history — one dot per due day, click to see that day ──
+const STATUS_META = {
+  done: { dot: "bg-emerald-500", cell: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" },
+  partial: { dot: "bg-amber-500", cell: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
+  missed: { dot: "bg-rose-500", cell: "bg-rose-500/10 text-rose-600 dark:text-rose-400" },
+  pending: { dot: "bg-muted-foreground/50", cell: "bg-muted text-muted-foreground" },
+};
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function monthKeyOf(dayKey) {
+  return dayKey.slice(0, 7);
+}
+
+function addMonths(monthKeyStr, delta) {
+  let [y, m] = monthKeyStr.split("-").map(Number);
+  const idx = (y * 12 + (m - 1)) + delta;
+  y = Math.floor(idx / 12);
+  m = (idx % 12) + 1;
+  return `${y}-${pad2(m)}`;
+}
+
+function daysInMonth(monthKeyStr) {
+  const [y, m] = monthKeyStr.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+// Padded 7-col grid of day keys (nulls for the leading/trailing blanks).
+function buildMonthGrid(monthKeyStr) {
+  const first = `${monthKeyStr}-01`;
+  const leading = weekdayOf(first);
+  const total = daysInMonth(monthKeyStr);
+  const cells = Array(leading).fill(null);
+  for (let d = 1; d <= total; d++) cells.push(`${monthKeyStr}-${pad2(d)}`);
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
+}
+
+function CalendarHistory({
+  r,
+  rows,
+  days,
+  entryMap,
+  today,
+  startKey,
+  endKey,
+  currentUser,
+  setViewEntry,
+  removeEntry,
+  deletingEntryId,
+}) {
+  const initialDay = days.includes(today) ? today : (days[0] ?? today);
+  const [viewMonth, setViewMonth] = useState(() => monthKeyOf(initialDay));
+  const [selectedDay, setSelectedDay] = useState(initialDay);
+
+  const minMonth = monthKeyOf(startKey);
+  const maxMonth = monthKeyOf(endKey && endKey < today ? endKey : today);
+
+  function dayStatus(d) {
+    if (!d) return null;
+    if (d > today || d < startKey || (endKey && d > endKey)) return null;
+    if (!isDueOn(r.schedule, d, startKey)) return null;
+    const submitted = rows.filter((a) => entryMap.has(`${a.id}::${d}`)).length;
+    if (submitted === 0) return d === today ? "pending" : "missed";
+    if (submitted === rows.length) return "done";
+    return "partial";
+  }
+
+  const grid = buildMonthGrid(viewMonth);
+  const [gy, gm] = viewMonth.split("-").map(Number);
+  const monthLabel = new Date(Date.UTC(gy, gm - 1, 1)).toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          disabled={viewMonth <= minMonth}
+          onClick={() => setViewMonth((m) => addMonths(m, -1))}
+        >
+          <ChevronLeft className="size-4" />
+        </Button>
+        <p className="text-sm font-semibold">{monthLabel}</p>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          disabled={viewMonth >= maxMonth}
+          onClick={() => setViewMonth((m) => addMonths(m, 1))}
+        >
+          <ChevronRight className="size-4" />
+        </Button>
+      </div>
+
+      <div>
+        <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-muted-foreground">
+          {WEEKDAYS.map((w) => (
+            <span key={w}>{w}</span>
+          ))}
+        </div>
+        <div className="mt-1 grid grid-cols-7 gap-1">
+          {grid.map((d, i) => {
+            const status = dayStatus(d);
+            const meta = status ? STATUS_META[status] : null;
+            const isSelected = d && d === selectedDay;
+            const isToday = d === today;
+            return (
+              <button
+                key={d ?? `blank-${i}`}
+                type="button"
+                disabled={!d || !status}
+                onClick={() => d && status && setSelectedDay(d)}
+                className={`relative flex aspect-square flex-col items-center justify-center rounded-lg text-xs transition-colors ${
+                  !d
+                    ? "invisible"
+                    : status
+                      ? `${meta.cell} hover:opacity-80 ${isSelected ? "ring-2 ring-primary" : ""}`
+                      : "text-muted-foreground/40"
+                } ${isToday ? "font-semibold" : ""}`}
+              >
+                {d ? Number(d.slice(-2)) : ""}
+                {status && (
+                  <span className={`absolute bottom-1 size-1 rounded-full ${meta.dot}`} />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+        <span className="flex items-center gap-1"><span className="size-1.5 rounded-full bg-emerald-500" /> All submitted</span>
+        <span className="flex items-center gap-1"><span className="size-1.5 rounded-full bg-amber-500" /> Partial</span>
+        <span className="flex items-center gap-1"><span className="size-1.5 rounded-full bg-rose-500" /> Missed</span>
+        <span className="flex items-center gap-1"><span className="size-1.5 rounded-full bg-muted-foreground/50" /> Awaiting</span>
+      </div>
+
+      <div className="rounded-lg border">
+        <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-2">
+          <p className="text-sm font-semibold">{formatDayKey(selectedDay)}</p>
+          {selectedDay === today && (
+            <Badge variant="outline" className="text-[10px]">Today</Badge>
+          )}
+        </div>
+        <ul className="divide-y">
+          {rows.map((a) => {
+            const e = entryMap.get(`${a.id}::${selectedDay}`);
+            const past = selectedDay < today;
+            const canDelete = e && r.canEdit;
+            return (
+              <li key={a.id} className="flex items-center gap-3 px-3 py-2">
+                <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-medium text-primary">
+                  {getInitials(a.name)}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                  {a.name}
+                  {a.id === currentUser.id ? " (you)" : ""}
+                </span>
+                {e ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setViewEntry(e)}
+                      className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-600 transition-colors hover:bg-emerald-500/25 dark:text-emerald-400"
+                    >
+                      <Check className="size-3" /> View
+                    </button>
+                    {canDelete && (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <button
+                            type="button"
+                            title="Delete this response"
+                            disabled={deletingEntryId === e.id}
+                            className="inline-flex items-center justify-center rounded-full p-1 text-muted-foreground transition-colors hover:bg-rose-500/10 hover:text-rose-600 disabled:opacity-50 dark:hover:text-rose-400"
+                          >
+                            {deletingEntryId === e.id ? (
+                              <Loader2 className="size-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="size-3.5" />
+                            )}
+                          </button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete this response?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Removes {a.name}&apos;s result for {formatDayKey(selectedDay)},
+                              including any attached files. This can&apos;t be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => removeEntry(e)}>
+                              Delete
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
+                  </>
+                ) : past ? (
+                  <span className="text-[11px] text-rose-500">Missed</span>
+                ) : (
+                  <span className="text-[11px] text-muted-foreground">Awaiting</span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
     </div>
   );
 }

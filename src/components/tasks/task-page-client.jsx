@@ -98,13 +98,13 @@ export function TaskPageClient({ task, assignees, currentUser }) {
 
   const mine = task.assignees.find((a) => a.id === currentUser.id) ?? null;
   const isManager = currentUser.tier === "OWNER" || currentUser.tier === "ADMIN";
-  // Only the Chairman (Owner tier) can save a file into the repository.
+  // Only an Admin (Owner tier) can save a file into the repository.
   const isChairman = currentUser.tier === "OWNER";
   const [savingId, setSavingId] = useState(null);
-  // Only the creator (assigner) or a manager (Owner/Admin) may edit the task
+  // Only the creator (assigner) or a manager (Admin/Manager) may edit the task
   // itself (title, description, priority, due date). Mirrors canEdit server-side.
   const canEdit = currentUser.id === task.assignerId || isManager;
-  // The creator can delete their own task; the Chairman/Director (Owner) can
+  // The creator can delete their own task; an Admin (Owner tier) can
   // delete any task. Mirrors canDeleteTask in lib/tasks.js.
   const canDelete = canEdit || currentUser.tier === "OWNER";
   // Anyone collaborating on the task (creator, an assignee, or a manager) can

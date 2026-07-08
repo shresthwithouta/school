@@ -7,8 +7,8 @@ import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 
 const DEMO = [
-  { name: "School Owner", email: "owner@school.edu", password: "owner123", role: "Chairman/Director", department: "Management", tierLabel: "Owner" },
-  { name: "Priya Principal", email: "admin@school.edu", password: "admin123", role: "Principal", department: "Administration", tierLabel: "Admin" },
+  { name: "School Admin", email: "owner@school.edu", password: "owner123", role: "Admin", department: "Management", tierLabel: "Owner" },
+  { name: "Manoj Manager", email: "admin@school.edu", password: "admin123", role: "Manager", department: "Administration", tierLabel: "Admin" },
   { name: "Tina Teacher", email: "worker@school.edu", password: "worker123", role: "Teacher", department: "Science", tierLabel: "Worker" },
 ];
 

@@ -135,9 +135,9 @@ function canManageRecurring(actor, r) {
 }
 
 // Whose daily uploads a viewer may see: their own always; the creator and the
-// Director/Chairman see everyone; other managers see the entries of people they
-// manage (per the tier rules). Files live inside the entry, so filtering the
-// entry covers its files too.
+// Admin see everyone; other managers see the entries of people they manage
+// (per the tier rules). Files live inside the entry, so filtering the entry
+// covers its files too.
 function canSeeEntry(actor, r, entry) {
   if (entry.assigneeId === actor.id) return true;
   if (r.assignerId === actor.id) return true;

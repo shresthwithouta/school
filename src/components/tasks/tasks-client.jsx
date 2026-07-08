@@ -18,7 +18,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  CornerDownRight,
+  Circle,
   ListTree,
   Users,
   Loader2,
@@ -28,6 +28,7 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -97,6 +98,31 @@ function subtaskToRow(task, s) {
     createdAt: s.createdAt,
     updatedAt: s.completedAt || s.createdAt,
   };
+}
+
+// Small colored status marker for a subtask checklist row — a filled check
+// for done, an outlined/tinted circle (colored to match STATUS_META) for
+// everything else, so state reads at a glance without a full badge.
+const SUBTASK_ICON_CLASS = {
+  completed: "text-emerald-500 fill-emerald-500/15",
+  delayed: "text-rose-500 fill-rose-500/15",
+  in_review: "text-violet-500 fill-violet-500/15",
+  in_progress: "text-amber-500 fill-amber-500/15",
+  assigned: "text-sky-500 fill-sky-500/15",
+};
+
+function SubtaskStatusIcon({ status }) {
+  if (status === "completed") {
+    return <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />;
+  }
+  return (
+    <Circle
+      className={cn(
+        "size-4 shrink-0",
+        SUBTASK_ICON_CLASS[status] || "text-muted-foreground/40"
+      )}
+    />
+  );
 }
 
 function AssigneeStack({ task }) {
@@ -534,7 +560,7 @@ export function TasksClient({ tasks, currentUser, initialStatus = "all" }) {
             Live
           </span>
         </div>
-        <div className="relative grid grid-cols-5 gap-1 sm:gap-2">
+        <div className="relative grid grid-cols-3 gap-1 sm:grid-cols-5 sm:gap-2">
           {STAT_CARDS.map((card) =>
             card.kind === "scope" ? (
               <StatCard
@@ -702,10 +728,10 @@ export function TasksClient({ tasks, currentUser, initialStatus = "all" }) {
         </div>
       ) : (
         <>
-        <div ref={listTopRef} className="rounded-xl border bg-card sm:overflow-x-auto">
+        <div ref={listTopRef} className="rounded-xl border bg-muted/20 sm:overflow-x-auto">
           <div className="sm:min-w-[680px]">
             {/* Column header — desktop table only; mobile renders stacked cards instead */}
-            <div className="hidden items-center gap-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground sm:flex">
+            <div className="hidden items-center gap-3 border-b bg-muted/40 px-4 py-2 text-xs font-medium text-muted-foreground sm:flex">
               <span className="flex-1">Issue</span>
               <span className="w-28 shrink-0">Status</span>
               <span className="w-24 shrink-0">Due</span>
@@ -713,9 +739,10 @@ export function TasksClient({ tasks, currentUser, initialStatus = "all" }) {
               <span className="w-20 shrink-0">People</span>
               <span className="w-20 shrink-0">Subtasks</span>
             </div>
-            {/* A steady minimum height keeps the panel the same size on short and
-                full pages, so it looks balanced rather than jumping around. */}
-            <ul className="min-h-88 divide-y">
+            {/* Each task is its own bordered card with breathing room between
+                rows, so adjacent tasks — and a task versus its nested
+                subtasks — are unmistakably separate at a glance. */}
+            <ul className="min-h-88 space-y-2 p-2 sm:space-y-2.5 sm:p-3">
               {pageItems.map((t) => {
                 const subs = t.subtasks || [];
                 const hasSubs = subs.length > 0;
@@ -723,7 +750,13 @@ export function TasksClient({ tasks, currentUser, initialStatus = "all" }) {
                 const open = hasSubs && (expanded.has(t.id) || autoExpand.has(t.id));
                 const desc = searchIndex.get(t.id)?.descSnippet || "";
                 return (
-                  <li key={t.id} className={cn(open && "bg-muted/20")}>
+                  <li
+                    key={t.id}
+                    className={cn(
+                      "overflow-hidden rounded-lg border bg-card transition-colors",
+                      open ? "border-primary/30 shadow-sm" : "hover:border-foreground/25"
+                    )}
+                  >
                     {/* Parent row — the whole row navigates via the stretched
                         link; the Subtasks cell sits above it to toggle expand.
                         Desktop only; mobile renders the card below instead. */}
@@ -732,7 +765,7 @@ export function TasksClient({ tasks, currentUser, initialStatus = "all" }) {
                         <span className="sr-only">Open {t.title}</span>
                       </Link>
                       <div className="min-w-0 flex-1">
-                        <span className="block truncate font-medium">{t.title}</span>
+                        <span className="block truncate font-semibold">{t.title}</span>
                         <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                           <span className="font-mono text-[11px] text-muted-foreground">
                             {t.key}
@@ -823,7 +856,7 @@ export function TasksClient({ tasks, currentUser, initialStatus = "all" }) {
                       </Link>
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
-                          <span className="block truncate font-medium">{t.title}</span>
+                          <span className="block truncate font-semibold">{t.title}</span>
                           <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                             <span className="font-mono text-[11px] text-muted-foreground">
                               {t.key}
@@ -891,106 +924,64 @@ export function TasksClient({ tasks, currentUser, initialStatus = "all" }) {
                       )}
                     </div>
 
-                    {/* Nested subtasks — same columns, indented with a tree rail
-                        so they clearly read as children of the task above. */}
+                    {/* Nested subtasks — a compact checklist rather than a
+                        second mini-table, so it reads as a clearly different,
+                        lighter-weight kind of row instead of a smaller task. */}
                     {open && (
-                      <div className="relative border-t bg-muted/20">
-                        <span
-                          aria-hidden
-                          className="pointer-events-none absolute inset-y-0 left-8 w-px bg-border sm:left-12"
-                        />
-                        <ul className="divide-y divide-border/40">
+                      <div className="border-t bg-muted/50 px-2 py-2 dark:bg-muted/20 sm:px-3">
+                        <p className="mb-1 px-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                          Subtasks
+                        </p>
+                        <ul>
                           {subs.map((s) => {
                             const r = subtaskToRow(t, s);
+                            const assignee = r.assignees[0];
                             return (
-                              <li key={r.id} className="group/sub relative">
-                                <Link href={r.href} className="absolute inset-0 z-[1]">
-                                  <span className="sr-only">Open {r.title}</span>
+                              <li key={r.id}>
+                                <Link
+                                  href={r.href}
+                                  className="flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors hover:bg-background"
+                                >
+                                  <SubtaskStatusIcon status={r.status} />
+                                  <span
+                                    className={cn(
+                                      "min-w-0 flex-1 truncate text-sm",
+                                      r.status === "completed" &&
+                                        "text-muted-foreground line-through"
+                                    )}
+                                  >
+                                    {r.title}
+                                  </span>
+                                  <span
+                                    title={`${PRIORITY_META[r.priority].label} priority`}
+                                    className={cn(
+                                      "size-1.5 shrink-0 rounded-full",
+                                      PRIORITY_META[r.priority].dotClass
+                                    )}
+                                  />
+                                  <span className="hidden shrink-0 font-mono text-[11px] text-muted-foreground sm:inline">
+                                    {r.key}
+                                  </span>
+                                  {r.dueDate && (
+                                    <span
+                                      className={cn(
+                                        "hidden shrink-0 text-xs sm:inline",
+                                        r.delayed
+                                          ? "font-medium text-rose-600 dark:text-rose-400"
+                                          : "text-muted-foreground"
+                                      )}
+                                    >
+                                      {formatDate(r.dueDate)}
+                                    </span>
+                                  )}
+                                  {assignee && (
+                                    <Avatar className="size-5 shrink-0" title={assignee.name}>
+                                      <AvatarFallback className="bg-primary/10 text-[9px] text-primary">
+                                        {getInitials(assignee.name)}
+                                      </AvatarFallback>
+                                    </Avatar>
+                                  )}
                                 </Link>
-                                {/* Desktop row */}
-                                <div className="hidden items-center gap-3 px-4 py-2.5 transition-colors hover:bg-accent/40 sm:flex">
-                                  <div className="flex min-w-0 flex-1 items-center gap-2 pl-9">
-                                    <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground/60" />
-                                    <div className="min-w-0">
-                                      <span className="block truncate text-sm font-medium">
-                                        {r.title}
-                                      </span>
-                                      <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
-                                        {r.key}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <div className="w-28 shrink-0">
-                                    <StatusBadge status={r.status} />
-                                  </div>
-                                  <div className="w-24 shrink-0">
-                                    {r.dueDate ? (
-                                      <>
-                                        <span
-                                          className={cn(
-                                            "text-xs",
-                                            r.delayed
-                                              ? "font-medium text-rose-600 dark:text-rose-400"
-                                              : "text-muted-foreground"
-                                          )}
-                                        >
-                                          {formatDate(r.dueDate)}
-                                        </span>
-                                        {r.delayed && r.daysLate > 0 && (
-                                          <span className="block text-[10px] font-medium text-rose-600 dark:text-rose-400">
-                                            {r.daysLate}d late
-                                          </span>
-                                        )}
-                                      </>
-                                    ) : (
-                                      <span className="text-xs text-muted-foreground/50">—</span>
-                                    )}
-                                  </div>
-                                  <div className="w-24 shrink-0">
-                                    <PriorityBadge priority={r.priority} />
-                                  </div>
-                                  <div className="w-20 shrink-0">
-                                    <AssigneeStack task={r} />
-                                  </div>
-                                  {/* Subtasks column — subtasks have none */}
-                                  <div className="w-20 shrink-0" />
-                                </div>
-
-                                {/* Mobile card */}
-                                <div className="flex flex-col gap-1.5 p-3 pl-9 transition-colors active:bg-accent/30 sm:hidden">
-                                  <div className="flex items-start justify-between gap-2">
-                                    <div className="flex min-w-0 items-start gap-1.5">
-                                      <CornerDownRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
-                                      <div className="min-w-0">
-                                        <span className="block truncate text-sm font-medium">
-                                          {r.title}
-                                        </span>
-                                        <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
-                                          {r.key}
-                                        </span>
-                                      </div>
-                                    </div>
-                                    <div className="shrink-0">
-                                      <StatusBadge status={r.status} />
-                                    </div>
-                                  </div>
-                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-5 text-xs">
-                                    <PriorityBadge priority={r.priority} />
-                                    {r.dueDate && (
-                                      <span
-                                        className={cn(
-                                          r.delayed
-                                            ? "font-medium text-rose-600 dark:text-rose-400"
-                                            : "text-muted-foreground"
-                                        )}
-                                      >
-                                        {formatDate(r.dueDate)}
-                                        {r.delayed && r.daysLate > 0 ? ` · ${r.daysLate}d late` : ""}
-                                      </span>
-                                    )}
-                                    <AssigneeStack task={r} />
-                                  </div>
-                                </div>
                               </li>
                             );
                           })}

@@ -9,6 +9,7 @@ export function Providers({ children }) {
     <ThemeProvider
       attribute="class"
       defaultTheme="light"
+      themes={["light", "dark", "reading"]}
       enableSystem={false}
       disableTransitionOnChange
     >

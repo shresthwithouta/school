@@ -99,6 +99,7 @@ export function UserDialog({
           }
         : {
             name: values.name,
+            email: values.email,
             role: values.role,
             department: values.department,
             phone: values.phone,
@@ -147,22 +148,22 @@ export function UserDialog({
             )}
           </div>
 
-          {mode === "create" && (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  {...register("email")}
-                  aria-invalid={!!errors.email}
-                />
-                {errors.email && (
-                  <p className="text-sm text-destructive">
-                    {errors.email.message}
-                  </p>
-                )}
-              </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                {...register("email")}
+                aria-invalid={!!errors.email}
+              />
+              {errors.email && (
+                <p className="text-sm text-destructive">
+                  {errors.email.message}
+                </p>
+              )}
+            </div>
+            {mode === "create" && (
               <div className="space-y-2">
                 <Label htmlFor="password">Temporary password</Label>
                 <Input
@@ -177,8 +178,8 @@ export function UserDialog({
                   </p>
                 )}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           <div className="space-y-2">
             <Label htmlFor="role">Role</Label>
@@ -208,10 +209,10 @@ export function UserDialog({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="department">Department</Label>
+              <Label htmlFor="department">Department / Subjects</Label>
               <Input
                 id="department"
-                placeholder="e.g. Science"
+                placeholder="e.g. Science, or Mathematics, Computer"
                 {...register("department")}
               />
             </div>

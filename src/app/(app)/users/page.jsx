@@ -18,16 +18,22 @@ export default async function UsersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatCard title="Total members" value={stats.total} icon={Users} />
         <StatCard
           title="Admins"
+          value={stats.byTier.OWNER}
+          icon={Shield}
+          accent="primary"
+        />
+        <StatCard
+          title="Managers"
           value={stats.byTier.ADMIN}
           icon={Shield}
           accent="primary"
         />
         <StatCard
-          title="Workers"
+          title="Teachers & Staff"
           value={stats.byTier.WORKER}
           icon={UserCheck}
           accent="emerald"

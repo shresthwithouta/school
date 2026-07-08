@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/session";
 import { getUserByIdForActor } from "@/lib/users";
 import { formatDate, getInitials } from "@/lib/utils";
 
-import { TierBadge, RoleBadge } from "@/components/role-badge";
+import { TierBadge } from "@/components/role-badge";
 import { ProfileForm } from "@/components/profile/profile-form";
 import { PasswordForm } from "@/components/profile/password-form";
 import { SignOutButton } from "@/components/profile/sign-out-button";
@@ -36,7 +36,6 @@ export default async function SettingsPage() {
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-xl font-semibold tracking-tight">{me.name}</h3>
               <TierBadge role={me.role} />
-              <RoleBadge role={me.role} />
             </div>
             <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted-foreground">
               <span className="inline-flex items-center gap-1.5">

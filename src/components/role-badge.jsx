@@ -2,7 +2,7 @@ import { Crown, Shield, User } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { getTier, TIERS, TIER_LABELS, } from "@/lib/rbac";
+import { getTier, TIERS } from "@/lib/rbac";
 
 const TIER_STYLES = {
   [TIERS.OWNER]:
@@ -19,7 +19,7 @@ const TIER_ICONS = {
   [TIERS.WORKER]: User,
 };
 
-/** Shows the access tier (Owner / Admin / Worker) for a role. */
+/** Shows the role (Admin / Manager / Teacher / Staff), colored by its tier. */
 export function TierBadge({
   role,
   className,
@@ -35,21 +35,6 @@ export function TierBadge({
       className={cn("gap-1 font-medium", TIER_STYLES[tier], className)}
     >
       <Icon className="size-3" />
-      {TIER_LABELS[tier]}
-    </Badge>
-  );
-}
-
-/** Shows the actual role title as a subtle badge. */
-export function RoleBadge({
-  role,
-  className,
-}
-
-
-) {
-  return (
-    <Badge variant="secondary" className={cn("font-medium", className)}>
       {role}
     </Badge>
   );

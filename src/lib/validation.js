@@ -18,6 +18,7 @@ export const createUserSchema = z.object({
 
 export const updateUserSchema = z.object({
   name: z.string().trim().min(2, "Name is too short").max(80).optional(),
+  email: z.string().trim().toLowerCase().email("Enter a valid email").optional(),
   role: roleEnum.optional(),
   department: optionalText(80),
   phone: optionalText(30),
@@ -256,7 +257,7 @@ export const decisionUpdateSchema = z.object({
   done: z.boolean(),
 });
 
-// ── File Repository (Chairman-managed) ─────────────────────────────
+// ── File Repository (Admin-managed) ─────────────────────────────────
 // Save an existing uploaded file into the repository. Carries the attachment
 // fields plus optional provenance (which task/meeting it came from).
 export const repoSaveSchema = z.object({

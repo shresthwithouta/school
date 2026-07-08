@@ -11,19 +11,14 @@
 import { canManage, isOwner } from "@/lib/rbac";
 
 // ── WHO IS ALLOWED TO SEE PRIVATE TASK CONTENT ──────────────────────
-// Management roles that can review submissions, approve/send-back work, and view
-// every private *comment* on any task. Add or remove a role here to change who
-// has that oversight. (Mirrors the OWNER + ADMIN management tiers today:
-// Chairman/Director, Principal, Manager.)
+// Management roles (Admin + Manager) can review submissions, approve/send-back
+// work, and view every private *comment* on any task.
 //
 // NOTE: this does NOT grant access to uploaded FILES — those are stricter (see
 // canSeeAttachment below): only the uploader, the task creator (assigner) and
-// the Chairman/Director see a submission file. Other managers don't.
-export const REVIEWER_ROLES = ["Chairman/Director", "Principal", "Manager"];
-
-/** A management reviewer — can review submissions and see private comments. */
+// the Admin see a submission file. Managers who aren't the assigner don't.
 export function isReviewer(role) {
-  return REVIEWER_ROLES.includes(role) || canManage(role);
+  return canManage(role);
 }
 
 /**
@@ -37,10 +32,10 @@ export function canReviewTask(actor, task) {
 /**
  * Whether `actor` may see a submission file. Files are the most sensitive task
  * content, so access is tighter than comments: only the person who uploaded it,
- * the task creator (assigner, who reviews their own task), and the
- * Chairman/Director (Owner — full oversight) can see it. Admins, Principals and
- * Managers who aren't the assigner cannot. The Chairman can additionally *share*
- * a file with anyone via the file Repository (see lib/repository.js).
+ * the task creator (assigner, who reviews their own task), and the Admin
+ * (Owner tier — full oversight) can see it. Managers who aren't the assigner
+ * cannot. The Admin can additionally *share* a file with anyone via the file
+ * Repository (see lib/repository.js).
  */
 export function canSeeAttachment(actor, task, att) {
   return (

@@ -25,7 +25,15 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { getInitials } from "@/lib/utils";
-import { TIER_LABELS } from "@/lib/rbac";
+import { TIERS } from "@/lib/rbac";
+
+// Describes access breadth by tier — deliberately not reusing a role name
+// (e.g. "Owner"/"Admin") so it never contradicts the role shown above it.
+const ACCESS_COPY = {
+  [TIERS.OWNER]: "Full access",
+  [TIERS.ADMIN]: "Management access",
+  [TIERS.WORKER]: "Standard access",
+};
 
 
 export function NavUser({ user }) {
@@ -81,7 +89,7 @@ export function NavUser({ user }) {
             <DropdownMenuGroup>
               <DropdownMenuItem disabled className="gap-2">
                 <Sparkles className="size-4" />
-                {TIER_LABELS[user.tier]} access
+                {ACCESS_COPY[user.tier]}
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />

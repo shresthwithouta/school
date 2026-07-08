@@ -9,7 +9,7 @@ import { getUserByIdForActor } from "@/lib/users";
 import { cn, formatDate, getInitials } from "@/lib/utils";
 
 import { StatusBadge, PriorityBadge } from "@/components/tasks/task-badges";
-import { TierBadge, RoleBadge } from "@/components/role-badge";
+import { TierBadge } from "@/components/role-badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -83,7 +83,6 @@ export default async function MemberAnalyticsPage({ params }) {
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-xl font-semibold tracking-tight">{user.name}</h2>
               <TierBadge role={user.role} />
-              <RoleBadge role={user.role} />
             </div>
             <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted-foreground">
               <span className="inline-flex items-center gap-1.5">

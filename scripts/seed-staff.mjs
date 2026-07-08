@@ -19,17 +19,17 @@ const PASSWORD = "School@2026";
 // (see src/lib/rbac.js ROLES).
 const ROLE_MAP = {
   Teacher: "Teacher",
-  "Office Staff": "Other Staff",
-  Other: "Other Staff",
-  Director: "Chairman/Director", // Owner tier — sees & manages everyone
-  Principal: "Principal",
+  "Office Staff": "Staff",
+  Other: "Staff",
+  Director: "Admin", // Owner tier — sees & manages everyone
+  Principal: "Manager",
 };
 
 // Fallback department when the person gave no subject/specialty.
 const DEPT_DEFAULT = {
-  "Chairman/Director": "Management",
-  Principal: "Administration",
-  "Other Staff": "Office",
+  Admin: "Management",
+  Manager: "Administration",
+  Staff: "Office",
   Teacher: "",
 };
 

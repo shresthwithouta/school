@@ -212,7 +212,7 @@ export function UsersManager({ users, actorId, actorRole }) {
                 <TableHead>Member</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Access</TableHead>
-                <TableHead className="hidden md:table-cell">Department</TableHead>
+                <TableHead className="hidden md:table-cell">Department / Subjects</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="hidden lg:table-cell">Last login</TableHead>
                 <TableHead className="w-10" />
