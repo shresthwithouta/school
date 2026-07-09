@@ -10,7 +10,7 @@ text, threaded replies, file/voice attachments, Timeliness/Quality/Accuracy
 evaluation, audit log), **Analytics**, **Meetings** (with attendance minutes),
 **file/voice uploads** (Cloudinary) and  **email notifications** (Resend). Events,
 calendar, approvals  and the AI features are still coming soon 
-
+  
 ## Tech stack
 
 - **Next.js 16** (App Router) + **React 19** + **JavaScript** (JSX)
