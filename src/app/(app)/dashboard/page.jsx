@@ -306,14 +306,14 @@ export default async function DashboardPage() {
   // overdue) plus a quick look at what's coming up in meetings.
   const kpis = [
     {
-      title: "In progress",
+      title: "Active",
       value: taskStats.inProgress,
       icon: Clock,
       accent: "amber",
       href: "/tasks?status=in_progress",
     },
     {
-      title: "Marked for review",
+      title: "Review",
       value: taskStats.inReview,
       icon: ClipboardCheck,
       accent: "sky",
@@ -334,7 +334,7 @@ export default async function DashboardPage() {
       href: "/tasks?status=delayed",
     },
     {
-      title: "Upcoming meetings",
+      title: "Meetings",
       value: upcomingMeetings.length,
       icon: CalendarClock,
       accent: "emerald",
@@ -370,9 +370,11 @@ export default async function DashboardPage() {
   );
 
   const kpiRow = (
-    <div className="grid grid-cols-5 gap-2 sm:gap-3">
+    <div className="flex flex-wrap gap-2 sm:grid sm:grid-cols-5 sm:gap-3">
       {kpis.map((k) => (
-        <MiniStat key={k.title} {...k} />
+        <div key={k.title} className="flex-1 basis-[30%]">
+          <MiniStat {...k} />
+        </div>
       ))}
     </div>
   );

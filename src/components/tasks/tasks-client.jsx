@@ -222,7 +222,7 @@ function StatCard({ card, count, active, onClick }) {
       data-active={active}
       onClick={onClick}
       className={cn(
-        "group flex flex-col gap-1 rounded-lg border bg-card px-2 py-1.5 text-left transition-all hover:bg-accent/60 hover:shadow-sm sm:gap-1.5 sm:rounded-xl sm:p-3",
+        "group flex w-full flex-col gap-1 rounded-lg border bg-card px-2 py-1.5 text-left transition-all hover:bg-accent/60 hover:shadow-sm sm:gap-1.5 sm:rounded-xl sm:p-3",
         ring
       )}
     >
@@ -560,28 +560,30 @@ export function TasksClient({ tasks, currentUser, initialStatus = "all" }) {
             Live
           </span>
         </div>
-        <div className="relative grid grid-cols-3 gap-1 sm:grid-cols-5 sm:gap-2">
+        <div className="relative flex flex-wrap gap-1 sm:grid sm:grid-cols-5 sm:gap-2">
           {STAT_CARDS.map((card) =>
             card.kind === "scope" ? (
-              <StatCard
-                key={card.key}
-                card={card}
-                count={approvalCount}
-                active={scope === card.key}
-                onClick={() =>
-                  setScope((s) => (s === card.key ? "all" : card.key))
-                }
-              />
+              <div key={card.key} className="flex-1 basis-[30%]">
+                <StatCard
+                  card={card}
+                  count={approvalCount}
+                  active={scope === card.key}
+                  onClick={() =>
+                    setScope((s) => (s === card.key ? "all" : card.key))
+                  }
+                />
+              </div>
             ) : (
-              <StatCard
-                key={card.key}
-                card={card}
-                count={card.statuses.reduce((n, s) => n + (counts[s] || 0), 0)}
-                active={status === card.key}
-                onClick={() =>
-                  setStatus((s) => (s === card.key ? "all" : card.key))
-                }
-              />
+              <div key={card.key} className="flex-1 basis-[30%]">
+                <StatCard
+                  card={card}
+                  count={card.statuses.reduce((n, s) => n + (counts[s] || 0), 0)}
+                  active={status === card.key}
+                  onClick={() =>
+                    setStatus((s) => (s === card.key ? "all" : card.key))
+                  }
+                />
+              </div>
             )
           )}
         </div>
