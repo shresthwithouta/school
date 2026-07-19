@@ -73,9 +73,9 @@ async function activeOwnerCount() {
 
 /**
  * Users the actor is allowed to see:
- *   Owner  -> everyone
- *   Admin  -> Admins + Workers (not Owners)
- *   Worker -> only themselves
+ *   Admin   -> everyone
+ *   Manager -> Managers + Teachers/Staff (not Admins)
+ *   Teacher/Staff -> only themselves
  */
 export const listVisibleUsers = cache(async function listVisibleUsers(actor) {
   const tiers = visibleTiers(actor.role);
@@ -95,7 +95,7 @@ export const listVisibleUsers = cache(async function listVisibleUsers(actor) {
 
 /**
  * People the actor may ASSIGN TASKS to — driven by role rank, not visibility
- * tiers. A Teacher can assign to other Teachers/Accountants even though user
+ * tiers. A Teacher can assign to other Teachers/Staff even though user
  * management hides them. Always includes the actor (self-assignment).
  * Inactive accounts are excluded — you can't hand work to a disabled user.
  */
@@ -115,9 +115,9 @@ export async function getUserByIdForActor(
   const u = await store.findById(id);
   if (!u) return null;
 
-  // Workers can only view themselves.
+  // Teachers/Staff can only view themselves.
   if (!canManage(actor.role) && u.id !== actor.id) return null;
-  // Admins cannot view Owners.
+  // Managers cannot view Admins.
   if (getTier(actor.role) === TIERS.ADMIN && getTier(u.role) === TIERS.OWNER) {
     return null;
   }
@@ -167,7 +167,10 @@ export async function createUser(
     throw new AppError("A user with that email already exists.", 409);
   }
 
-  const passwordHash = await bcrypt.hash(input.password, 10);
+  // No password set by the creator? Default it to the member's own email —
+  // memorable enough to hand over verbally, and mustChangePassword nudges
+  // them to pick their own on first sign-in.
+  const passwordHash = await bcrypt.hash(input.password || email, 10);
   const created = await store.create({
     name: input.name.trim(),
     email,
@@ -203,20 +206,29 @@ export async function updateUser(
     }
   }
 
-  // An Owner must not strip their own access by mistake.
-  if (u.id === actor.id && input.role && !isOwner(input.role) && isOwner(actor.role)) {
-    throw new AppError("You cannot change your own Owner role.", 400);
+  let email;
+  if (input.email && input.email !== u.email) {
+    email = input.email.toLowerCase().trim();
+    const existing = await store.findByEmail(email);
+    if (existing && existing.id !== u.id) {
+      throw new AppError("A user with that email already exists.", 409);
+    }
   }
 
-  // Never let the organisation lose its last active Owner. Another Owner could
-  // otherwise demote or deactivate the only remaining Owner, locking everyone
-  // out of Owner-tier management for good.
+  // An Admin must not strip their own access by mistake.
+  if (u.id === actor.id && input.role && !isOwner(input.role) && isOwner(actor.role)) {
+    throw new AppError("You cannot change your own Admin role.", 400);
+  }
+
+  // Never let the organisation lose its last active Admin. Another Admin could
+  // otherwise demote or deactivate the only remaining Admin, locking everyone
+  // out of Admin-tier management for good.
   if (isOwner(u.role) && (u.isActive ?? true)) {
     const losingOwner =
       (input.role && !isOwner(input.role)) || input.isActive === false;
     if (losingOwner && (await activeOwnerCount()) <= 1) {
       throw new AppError(
-        "This is the last active Owner — promote another Owner before changing this account.",
+        "This is the last active Admin — promote another Admin before changing this account.",
         400
       );
     }
@@ -224,6 +236,7 @@ export async function updateUser(
 
   const patch = {};
   if (input.name !== undefined) patch.name = input.name.trim();
+  if (email !== undefined) patch.email = email;
   if (input.role !== undefined) patch.role = input.role;
   if (input.department !== undefined) patch.department = input.department;
   if (input.phone !== undefined) patch.phone = input.phone;
@@ -258,9 +271,9 @@ export async function deleteUser(
     throw new AppError("You are not allowed to delete this user.", 403);
   }
 
-  // Don't let the only remaining Owner be deleted (org lockout).
+  // Don't let the only remaining Admin be deleted (org lockout).
   if (isOwner(u.role) && (u.isActive ?? true) && (await activeOwnerCount()) <= 1) {
-    throw new AppError("This is the last active Owner and cannot be deleted.", 400);
+    throw new AppError("This is the last active Admin and cannot be deleted.", 400);
   }
 
   // Tasks and meetings store denormalized copies of the user, so a hard delete

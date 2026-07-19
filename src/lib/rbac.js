@@ -1,17 +1,23 @@
 /**
  * Role-Based Access Control.
  *
+ * Four roles, top of list = highest authority: Admin, Manager, Teacher, Staff.
+ * Teacher and Staff sit at the same rank — neither manages the other.
+ *
  * Two independent concepts live here:
  *
  * 1. Visibility TIERS — who can SEE and MANAGE whom (the /users area, team
- *    stats, task visibility). Three tiers:
- *      OWNER  — sees everyone, manages everyone        (top of the hierarchy)
- *      ADMIN  — sees other Admins + Workers            (cannot see Owners)
- *      WORKER — sees only their own scope              (bottom of the hierarchy)
+ *    stats, task visibility). Three tiers, one role per tier except the
+ *    bottom one (NOTE: the tier key "ADMIN" is an internal holdover name —
+ *    it now corresponds to the "Manager" role, not the "Admin" role; "Admin"
+ *    the role is tier OWNER):
+ *      OWNER  — role "Admin"            — sees everyone, manages everyone
+ *      ADMIN  — role "Manager"          — sees Managers + Teachers/Staff (not Admins)
+ *      WORKER — roles "Teacher"/"Staff" — sees only their own scope
  *
  * 2. Task-assignment RANK — who may ASSIGN a task to whom. This is a finer
  *    grain than tiers: a Teacher (a Worker) can still hand work to other
- *    Teachers/Accountants even though they can't see them in user management.
+ *    Teachers/Staff even though they can't see them in user management.
  *    Rule: you may assign to anyone at your own rank or below (rank 1 is the
  *    highest authority). See ROLE_RANKS / canAssignTaskTo below.
  *
@@ -25,43 +31,28 @@ export const TIERS = {
 };
 
 /** Canonical role values (stored in the DB). Top of list = highest authority. */
-export const ROLES = [
-  "Chairman/Director",
-  "Principal",
-  "Manager",
-  "Coordinators",
-  "Teacher",
-  "Accountant",
-  "Other Staff",
-];
+export const ROLES = ["Admin", "Manager", "Teacher", "Staff"];
 
 /** Maps every role to its visibility tier. */
 export const ROLE_TIERS = {
-  "Chairman/Director": TIERS.OWNER,
-  Principal: TIERS.ADMIN,
+  Admin: TIERS.OWNER,
   Manager: TIERS.ADMIN,
-  Coordinators: TIERS.WORKER,
   Teacher: TIERS.WORKER,
-  Accountant: TIERS.WORKER,
-  "Other Staff": TIERS.WORKER,
+  Staff: TIERS.WORKER,
 };
 
 /**
  * Task-assignment authority. Lower number = higher authority.
  * You can assign tasks to anyone whose rank is >= your own rank.
- *   1  Chairman/Director  → can assign to everyone
- *   2  Principal, Manager → everyone except Chairman/Director (and each other)
- *   3  Coordinators, Teacher, Accountant → each other + Other Staff
- *   4  Other Staff        → Other Staff only (lowest)
+ *   1  Admin            → can assign to everyone
+ *   2  Manager          → everyone except Admin
+ *   3  Teacher, Staff    → each other only (same rank)
  */
 export const ROLE_RANKS = {
-  "Chairman/Director": 1,
-  Principal: 2,
+  Admin: 1,
   Manager: 2,
-  Coordinators: 3,
   Teacher: 3,
-  Accountant: 3,
-  "Other Staff": 4,
+  Staff: 3,
 };
 
 /** Unknown / legacy roles fall to the bottom rank. */
@@ -69,33 +60,19 @@ const LOWEST_RANK = 99;
 
 /** Short human label + description for each role (used in the UI). */
 export const ROLE_META = {
-  "Chairman/Director": {
+  Admin: {
     tier: TIERS.OWNER,
-    description: "Top authority. Full oversight; can assign work to anyone.",
-  },
-  Principal: {
-    tier: TIERS.ADMIN,
-    description:
-      "Leads the school. Assigns work to anyone except the Chairman/Director.",
+    description: "Top authority. Full oversight; can assign work to anyone and appoint Managers.",
   },
   Manager: {
     tier: TIERS.ADMIN,
-    description:
-      "Runs operations. Assigns work to the Principal and everyone below.",
-  },
-  Coordinators: {
-    tier: TIERS.WORKER,
-    description: "Coordinates teachers, accountants and staff tasks.",
+    description: "Runs day-to-day operations. Assigns work to Teachers and Staff.",
   },
   Teacher: {
     tier: TIERS.WORKER,
     description: "Executes assigned academic and class tasks.",
   },
-  Accountant: {
-    tier: TIERS.WORKER,
-    description: "Handles budgets, procurement and finance tasks.",
-  },
-  "Other Staff": {
+  Staff: {
     tier: TIERS.WORKER,
     description: "Support staff who carry out assigned tasks.",
   },
@@ -185,8 +162,3 @@ export function canManageTarget(actorRole, targetRole) {
   return false;
 }
 
-export const TIER_LABELS = {
-  OWNER: "Owner",
-  ADMIN: "Admin",
-  WORKER: "Worker",
-};

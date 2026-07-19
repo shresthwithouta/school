@@ -38,7 +38,14 @@ const fieldsSchema = createSubtaskSchema.omit({ assigneeId: true });
 // Edit a subtask in a modal — the same affordance tasks get via TaskDialog, so
 // you can tweak a subtask without leaving the task page. Mirrors the subtask
 // create form's fields and posts to the subtask PATCH endpoint.
-export function SubtaskDialog({ task, sub, assignees, currentUserId, trigger }) {
+export function SubtaskDialog({
+  task,
+  sub,
+  assignees,
+  currentUserId,
+  canEditDate = true,
+  trigger,
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   // Single assignee, held as a 0-or-1 array so we can reuse UserCombobox.
@@ -65,10 +72,15 @@ export function SubtaskDialog({ task, sub, assignees, currentUserId, trigger }) 
   const expectedDate = useWatch({ control, name: "expectedDate" });
 
   async function onSubmit(values) {
+    // Only whoever raised the subtask, the task creator, or a manager can move
+    // its due date — drop the field entirely for anyone else rather than let
+    // the server reject the whole save.
+    const { expectedDate, ...rest } = values;
+    const payload = canEditDate ? values : rest;
     const res = await fetch(`/api/tasks/${task.id}/subtasks/${sub.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...values, assigneeId: assignee[0] ?? "" }),
+      body: JSON.stringify({ ...payload, assigneeId: assignee[0] ?? "" }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -162,7 +174,13 @@ export function SubtaskDialog({ task, sub, assignees, currentUserId, trigger }) 
                     setValue("expectedDate", v, { shouldDirty: true })
                   }
                   placeholder="No date set"
+                  disabled={!canEditDate}
                 />
+                {!canEditDate && (
+                  <p className="text-xs text-muted-foreground">
+                    Only the subtask&apos;s creator or a manager can change this.
+                  </p>
+                )}
               </div>
             </div>
           </div>

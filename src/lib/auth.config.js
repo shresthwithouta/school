@@ -1,4 +1,4 @@
-
+import { NextResponse } from "next/server";
 
 /**
  * Edge-safe Auth.js configuration.
@@ -15,9 +15,16 @@ export const authConfig = {
   pages: {
     signIn: "/login",
   },
-  // Cap session lifetime to 8 hours (a working day). The jwt callback also
-  // re-syncs role/active status every few minutes for mid-session changes.
-  session: { strategy: "jwt", maxAge: 8 * 60 * 60 },
+  // Sessions persist for 30 days and roll forward on activity (re-issued once
+  // a day at most), so staying logged in doesn't require reauthenticating every
+  // few hours — important for the installed PWA/TWA, which has no separate
+  // "remember me" flow. The jwt callback still re-syncs role/active status
+  // every few minutes so a demotion/deactivation takes effect mid-session.
+  session: {
+    strategy: "jwt",
+    maxAge: 30 * 24 * 60 * 60,
+    updateAge: 24 * 60 * 60,
+  },
   callbacks: {
     // Runs in middleware for every matched request.
     authorized({ auth, request: { nextUrl } }) {
@@ -33,7 +40,16 @@ export const authConfig = {
       }
 
       // Everything else requires authentication.
-      return isLoggedIn;
+      if (isLoggedIn) return true;
+
+      // Rewrite in place instead of an HTTP redirect. The PWA's start_url is
+      // "/dashboard" — on a cold launch with no/expired session, a 3xx here
+      // is the first thing Chrome's installed-app window sees, and it briefly
+      // shows the address bar (with the site's domain + a close button) over
+      // the standalone app as a phishing safeguard before settling into
+      // chromeless mode. A same-URL rewrite renders the login page without
+      // ever sending a redirect, so the launch stays chromeless.
+      return NextResponse.rewrite(new URL("/login", nextUrl));
     },
   },
   providers: [],

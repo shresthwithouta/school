@@ -4,12 +4,13 @@ import { handleApiError } from "@/lib/api";
 import { AppError } from "@/lib/errors";
 import { getCurrentUser } from "@/lib/session";
 import { isOwner } from "@/lib/rbac";
-import { spawnDueRecurringTasks } from "@/lib/tasks";
+import { sendRecurringReminders } from "@/lib/recurring";
 
-// Spawns today's occurrence for every due recurring task and emails/pushes the
-// assignees. Triggered by a daily scheduler (Vercel Cron — see vercel.json — or
-// any external cron hitting this URL). Uses the DB, so it must run on Node, not
-// the Edge runtime.
+// Reminds every assignee who hasn't uploaded today's result for an active
+// recurring task (see lib/recurring). Recurring tasks are now a single ongoing
+// assignment with a per-day upload log — nothing is cloned. Triggered by a daily
+// scheduler (Vercel Cron — see vercel.json — or any external cron hitting this
+// URL). Uses the DB, so it must run on Node, not the Edge runtime.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -28,7 +29,7 @@ async function authorize(req) {
 async function run(req) {
   try {
     await authorize(req);
-    const result = await spawnDueRecurringTasks();
+    const result = await sendRecurringReminders();
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
     return handleApiError(err);

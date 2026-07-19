@@ -37,16 +37,17 @@ audit log.
 
 **Visibility of task content lives in one file — `src/lib/task-access.js`** (pure,
 client-safe). Submission **files** are the most restricted content: only the
-uploader, the task creator (assigner) and the **Chairman/Director** (Owner) see a
-file — other managers don't (`canSeeAttachment` → `isOwner`). Comment **text**
-stays public. When the **creator** @mentions someone in a comment it becomes
-**private** (creator + mentioned + management reviewers via `REVIEWER_ROLES`),
-must be ≥ 50 chars, and emails them. `lib/tasks.js` runs every task it returns
-through `viewTask(actor, task)` to strip content the viewer may not see.
-Bulk-assign by role and a single group-CC assignment email are also supported.
+uploader, the task creator (assigner) and the **Admin** (Owner tier) see a
+file — Managers who aren't the assigner don't (`canSeeAttachment` → `isOwner`).
+Comment **text** stays public. When the **creator** @mentions someone in a
+comment it becomes **private** (creator + mentioned + management reviewers via
+`isReviewer`, i.e. Admin/Manager), must be ≥ 50 chars, and emails them.
+`lib/tasks.js` runs every task it returns through `viewTask(actor, task)` to
+strip content the viewer may not see. Bulk-assign by role and a single
+group-CC assignment email are also supported.
 
-## File Repository (`/repository`, Chairman-only management)
-`src/lib/repository.js` + `models/RepoFile.js`. The **Chairman** (Owner) can
+## File Repository (`/repository`, Admin-only management)
+`src/lib/repository.js` + `models/RepoFile.js`. The **Admin** (Owner tier) can
 **Save** a submitted file from a task (the Cloudinary asset is **copied** via
 `copyAsset` so it's independent of the source), **Share** it with specific people
 (`sharedWith`), and **multi-select delete** it permanently (removes the record +
@@ -54,7 +55,7 @@ destroys the Cloudinary asset, behind a confirm). Everyone else sees only files
 shared with them. Saving/sharing/deleting are all Owner-gated server-side.
 
 ## Auth & access model
-- **No public sign-up.** Owner/Admin create all accounts in-app. Demo logins:
+- **No public sign-up.** Admin/Manager create all accounts in-app. Demo logins:
   owner@school.edu/owner123, admin@school.edu/admin123, worker@school.edu/worker123.
 - Auth.js **split config**: `src/lib/auth.config.js` is Edge-safe (no Mongoose) and
   used by `src/proxy.js` (Next 16 renamed `middleware` → `proxy`). The full config
@@ -62,9 +63,16 @@ shared with them. Saving/sharing/deleting are all Owner-gated server-side.
 - Session carries `role` + `tier` (set in the auth `jwt`/`session` callbacks).
 
 ## Role hierarchy (the core rule)
-- Roles keep PDF titles; each maps to a tier in `src/lib/rbac.js` (`ROLE_TIERS`).
-- Tiers: **Owner** (sees all) → **Admin** (sees Admins+Workers, not Owners) →
-  **Worker** (only self). Owner manages anyone; Admin manages Workers only.
+- Four roles, in `src/lib/rbac.js` (`ROLES`): **Admin → Manager → Teacher/Staff**
+  (Teacher and Staff are the same rank; neither manages the other).
+- Each role maps to a visibility tier (`ROLE_TIERS`). The tier keys are legacy
+  internal names and no longer match the role names 1:1: tier `OWNER` = role
+  **Admin**, tier `ADMIN` = role **Manager**, tier `WORKER` = roles **Teacher**
+  and **Staff**.
+- Tier rule: **Admin** (sees all) → **Manager** (sees Managers+Teachers/Staff,
+  not Admins) → **Teacher/Staff** (only self). Admin manages anyone; Manager
+  manages Teachers/Staff only. Only an Admin can appoint/create a Manager
+  (`assignableRoles`).
 - Visibility/permission helpers are **pure** and live in `rbac.js` so both client
   and server can use them. The data layer (`src/lib/users.js`) re-enforces them
   against the DB; API routes re-check too. UI hiding is never the only guard.
@@ -84,7 +92,7 @@ shared with them. Saving/sharing/deleting are all Owner-gated server-side.
 lifecycle with **submit-for-review → approve/send-back** (subtasks too — only the
 subtask creator closes), bulk-assign by role, subtasks, rich text, threaded
 replies, **private submission files**, **private @mention comments**, audit log),
-**File Repository** (`/repository`; Chairman saves/shares/deletes files), Analytics
+**File Repository** (`/repository`; Admin saves/shares/deletes files), Analytics
 (/reports), Files/voice (Cloudinary), Email (Gmail SMTP via nodemailer — HTML;
 group-CC assignment + meeting invites + review notices), Web Push (VAPID via
 `web-push`; `src/lib/push.js` mirrors `email.js` and fires on the same

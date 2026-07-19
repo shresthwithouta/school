@@ -55,6 +55,8 @@ import { cn, formatDateTime, getInitials } from "@/lib/utils";
 
 
 
+const LIST_PAGE_SIZE = 6;
+
 export function MeetingPageClient({
   meeting,
   people,
@@ -72,6 +74,10 @@ export function MeetingPageClient({
   const [summary, setSummary] = useState("");
   const [decision, setDecision] = useState("");
   const [decisionDate, setDecisionDate] = useState("");
+  // Decisions/messages can pile up over a long-running meeting — collapsed to
+  // the most recent entries by default, expandable via "See all".
+  const [showAllDecisions, setShowAllDecisions] = useState(false);
+  const [showAllMessages, setShowAllMessages] = useState(false);
 
   const organizer =
     currentUser.id === meeting.createdById || currentUser.tier === "OWNER";
@@ -182,10 +188,12 @@ export function MeetingPageClient({
               {completed ? "Completed" : "Scheduled"}
             </Badge>
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight">{meeting.title}</h1>
-          <p className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-            <CalendarClock className="size-4" />
-            {meeting.scheduledAt ? formatDateTime(meeting.scheduledAt) : "No time set"}
+          <h1 className="wrap-break-word text-2xl font-semibold tracking-tight">{meeting.title}</h1>
+          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <CalendarClock className="size-4" />
+              {meeting.scheduledAt ? formatDateTime(meeting.scheduledAt) : "No time set"}
+            </span>
             {" · by "}
             {meeting.createdByName}
           </p>
@@ -294,19 +302,21 @@ export function MeetingPageClient({
                     rows={2}
                     className="bg-background"
                   />
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label className="text-xs text-muted-foreground">
-                      Target date
-                    </label>
-                    <DateTimePicker
-                      value={decisionDate}
-                      onChange={setDecisionDate}
-                      placeholder="No target date"
-                      className="w-auto min-w-44"
-                    />
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="flex items-center gap-2">
+                      <label className="shrink-0 text-xs text-muted-foreground">
+                        Target date
+                      </label>
+                      <DateTimePicker
+                        value={decisionDate}
+                        onChange={setDecisionDate}
+                        placeholder="No target date"
+                        className="w-auto min-w-44"
+                      />
+                    </div>
                     <Button
                       size="sm"
-                      className="ml-auto"
+                      className="w-full sm:ml-auto sm:w-auto"
                       onClick={addDecision}
                       disabled={busy === "add-decision" || !decision.trim()}
                     >
@@ -326,7 +336,10 @@ export function MeetingPageClient({
                 </p>
               ) : (
                 <ul className="space-y-1.5">
-                  {meeting.decisions.map((d) => {
+                  {(showAllDecisions
+                    ? meeting.decisions
+                    : meeting.decisions.slice(0, LIST_PAGE_SIZE)
+                  ).map((d) => {
                     const overdue = d.overdue;
                     return (
                       <li key={d.id} className="flex items-start gap-2 rounded-lg border p-2.5">
@@ -346,7 +359,7 @@ export function MeetingPageClient({
                         <div className="min-w-0 flex-1">
                           <span
                             className={cn(
-                              "text-sm",
+                              "wrap-break-word text-sm",
                               d.done && "text-muted-foreground line-through"
                             )}
                           >
@@ -393,6 +406,18 @@ export function MeetingPageClient({
                   })}
                 </ul>
               )}
+              {meeting.decisions.length > LIST_PAGE_SIZE && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-2 text-muted-foreground"
+                  onClick={() => setShowAllDecisions((v) => !v)}
+                >
+                  {showAllDecisions
+                    ? "Show less"
+                    : `See all (${meeting.decisions.length})`}
+                </Button>
+              )}
             </CardContent>
           </Card>
 
@@ -413,7 +438,10 @@ export function MeetingPageClient({
                 <p className="text-sm text-muted-foreground">No messages yet.</p>
               ) : (
                 <ul className="space-y-3">
-                  {meeting.messages.map((m) => (
+                  {(showAllMessages
+                    ? meeting.messages
+                    : meeting.messages.slice(-LIST_PAGE_SIZE)
+                  ).map((m) => (
                     <li key={m.id} className="flex gap-3">
                       <Avatar className="size-7 shrink-0">
                         <AvatarFallback className="bg-primary/10 text-xs text-primary">
@@ -421,9 +449,9 @@ export function MeetingPageClient({
                         </AvatarFallback>
                       </Avatar>
                       <div className="min-w-0 flex-1 rounded-lg border p-2.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-medium">{m.authorName}</span>
-                          <span className="text-xs text-muted-foreground">
+                        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+                          <span className="truncate text-sm font-medium">{m.authorName}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
                             {formatDateTime(m.createdAt)}
                           </span>
                         </div>
@@ -437,6 +465,18 @@ export function MeetingPageClient({
                     </li>
                   ))}
                 </ul>
+              )}
+              {meeting.messages.length > LIST_PAGE_SIZE && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground"
+                  onClick={() => setShowAllMessages((v) => !v)}
+                >
+                  {showAllMessages
+                    ? "Show less"
+                    : `See all messages (${meeting.messages.length})`}
+                </Button>
               )}
 
               {!completed && (

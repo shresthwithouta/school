@@ -6,23 +6,23 @@ import { isOwner } from "@/lib/rbac";
 import { copyAsset, destroyAsset } from "@/lib/cloudinary";
 import RepoFile from "@/models/RepoFile";
 
-// The file Repository is the Chairman's (Owner tier) private store. Only the
-// Chairman can save, share and delete files; everyone else sees only the files
-// the Chairman has shared with them.
+// The file Repository is the Admin's (Owner tier) private store. Only an Admin
+// can save, share and delete files; everyone else sees only the files an
+// Admin has shared with them.
 
 function now() {
   return new Date().toISOString();
 }
 
-/** Throws unless the actor is the Chairman/Director (Owner tier). */
-function requireChairman(actor) {
+/** Throws unless the actor has the Admin role (Owner tier). */
+function requireAdmin(actor) {
   if (!isOwner(actor.role)) {
-    throw new AppError("Only the Chairman can manage the file repository.", 403);
+    throw new AppError("Only an Admin can manage the file repository.", 403);
   }
 }
 
 /**
- * Files this actor may see: the Chairman sees everything; everyone else sees
+ * Files this actor may see: an Admin sees everything; everyone else sees
  * only files shared with them. Newest first.
  */
 export async function listRepositoryFiles(actor) {
@@ -35,13 +35,13 @@ export async function listRepositoryFiles(actor) {
 }
 
 /**
- * Save a file into the repository (Chairman only). The Cloudinary asset is
+ * Save a file into the repository (Admin only). The Cloudinary asset is
  * copied so the saved file is independent of the task/meeting it came from
  * (deleting that later won't break this). Falls back to referencing the
  * original asset when Cloudinary isn't configured.
  */
 export async function saveToRepository(actor, input) {
-  requireChairman(actor);
+  requireAdmin(actor);
   await connectToDatabase();
 
   let asset = null;
@@ -74,9 +74,9 @@ export async function saveToRepository(actor, input) {
   return stripMongo(file);
 }
 
-/** Replace a repository file's share list (Chairman only). */
+/** Replace a repository file's share list (Admin only). */
 export async function shareRepositoryFile(actor, id, userIds) {
-  requireChairman(actor);
+  requireAdmin(actor);
   await connectToDatabase();
   const doc = await RepoFile.findOne({ id }).lean();
   if (!doc) throw new AppError("File not found.", 404);
@@ -86,11 +86,11 @@ export async function shareRepositoryFile(actor, id, userIds) {
 }
 
 /**
- * Permanently delete repository files (Chairman only) — removes the records and
+ * Permanently delete repository files (Admin only) — removes the records and
  * destroys their Cloudinary assets.
  */
 export async function deleteRepositoryFiles(actor, ids) {
-  requireChairman(actor);
+  requireAdmin(actor);
   await connectToDatabase();
   const docs = await RepoFile.find({ id: { $in: ids } }).lean();
   if (docs.length === 0) return { deleted: 0 };

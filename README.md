@@ -3,14 +3,14 @@
 A centralized platform to assign, track, review, approve and evaluate tasks across
 all school stakeholders — Chairman, Principal, Coordinators, Managers, Accountants,
 Teachers and Team Members. Built with a role-based visibility hierarchy
-
+ 
 Built so far: authentication + role hierarchy, dashboards, team management, profiles
 with photo upload, a full **Tasks** module (multi-assignee lifecycle, subtasks, rich
 text, threaded replies, file/voice attachments, Timeliness/Quality/Accuracy
-evaluation, audit log), **Analytics**, **Meetings** (with attendance + minutes),
-**file/voice uploads** (Cloudinary) and **email notifications** (Resend). Events,
-calendar, approvals and the AI features are still "coming soon
-
+evaluation, audit log), **Analytics**, **Meetings** (with attendance minutes),
+**file/voice uploads** (Cloudinary) and  **email notifications** (Resend). Events,
+calendar, approvals  and the AI features are still coming soon 
+  
 ## Tech stack
 
 - **Next.js 16** (App Router) + **React 19** + **JavaScript** (JSX)
@@ -123,7 +123,7 @@ scripts/seed.js              # Seed demo accounts + print logins
 ## Security notes
 
 - Passwords are hashed with bcrypt and never returned by the API.
-- Every API route re-checks authentication and authorization server-side —
+- Every API route re-checks authentication and authorization server-side
   the UI hiding an action is never the only line of defense.
 - The Edge `proxy` only verifies the signed session cookie; Mongoose/bcrypt stay
   in the Node runtime (Auth.js split-config pattern).

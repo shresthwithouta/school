@@ -18,15 +18,17 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  CornerDownRight,
+  Circle,
   ListTree,
   Users,
   Loader2,
   AlertTriangle,
   CheckCircle2,
+  ClipboardCheck,
   XCircle,
 } from "lucide-react";
 
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -42,7 +44,7 @@ import {
   PriorityBadge,
   RecurringBadge,
 } from "@/components/tasks/task-badges";
-import { TASK_PRIORITIES, PRIORITY_META } from "@/lib/task-meta";
+import { TASK_STATUSES, STATUS_META, TASK_PRIORITIES, PRIORITY_META } from "@/lib/task-meta";
 import { cn, formatDate, toPlainText, getInitials } from "@/lib/utils";
 
 const DAY_MS = 86_400_000;
@@ -98,6 +100,31 @@ function subtaskToRow(task, s) {
   };
 }
 
+// Small colored status marker for a subtask checklist row — a filled check
+// for done, an outlined/tinted circle (colored to match STATUS_META) for
+// everything else, so state reads at a glance without a full badge.
+const SUBTASK_ICON_CLASS = {
+  completed: "text-emerald-500 fill-emerald-500/15",
+  delayed: "text-rose-500 fill-rose-500/15",
+  in_review: "text-violet-500 fill-violet-500/15",
+  in_progress: "text-amber-500 fill-amber-500/15",
+  assigned: "text-sky-500 fill-sky-500/15",
+};
+
+function SubtaskStatusIcon({ status }) {
+  if (status === "completed") {
+    return <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />;
+  }
+  return (
+    <Circle
+      className={cn(
+        "size-4 shrink-0",
+        SUBTASK_ICON_CLASS[status] || "text-muted-foreground/40"
+      )}
+    />
+  );
+}
+
 function AssigneeStack({ task }) {
   const people = task.assignees || [];
   const count = people.length;
@@ -132,10 +159,22 @@ function AssigneeStack({ task }) {
 
 // Live overview cards — each one filters the list when clicked.
 // "active" merges in-progress + assigned + in-review (tasks in the pipeline,
-// including those submitted and waiting on a reviewer).
+// including those submitted and waiting on a reviewer). "approvals" is a
+// scope filter rather than a status one — it drives the same `scope` state
+// used by the filter logic below.
 const STAT_CARDS = [
   {
+    key: "approvals",
+    kind: "scope",
+    label: "Pending approvals",
+    Icon: ClipboardCheck,
+    iconClass: "text-violet-600 dark:text-violet-400",
+    ring: "data-[active=true]:border-violet-500/50 data-[active=true]:bg-violet-500/10",
+    dot: "bg-violet-500",
+  },
+  {
     key: "active",
+    kind: "status",
     statuses: ["in_progress", "assigned", "in_review"],
     label: "Active",
     Icon: Loader2,
@@ -145,6 +184,7 @@ const STAT_CARDS = [
   },
   {
     key: "delayed",
+    kind: "status",
     statuses: ["delayed"],
     label: "Delayed",
     Icon: AlertTriangle,
@@ -154,6 +194,7 @@ const STAT_CARDS = [
   },
   {
     key: "completed",
+    kind: "status",
     statuses: ["completed"],
     label: "Completed",
     Icon: CheckCircle2,
@@ -163,6 +204,7 @@ const STAT_CARDS = [
   },
   {
     key: "cancelled",
+    kind: "status",
     statuses: ["cancelled"],
     label: "Cancelled",
     Icon: XCircle,
@@ -180,21 +222,19 @@ function StatCard({ card, count, active, onClick }) {
       data-active={active}
       onClick={onClick}
       className={cn(
-        "group flex items-center justify-between gap-2 rounded-lg border bg-card px-2.5 py-1.5 text-left transition-all hover:bg-accent/60 hover:shadow-sm",
-        "sm:flex-col sm:items-start sm:gap-2 sm:rounded-xl sm:p-4",
+        "group flex w-full flex-col gap-1 rounded-lg border bg-card px-2 py-1.5 text-left transition-all hover:bg-accent/60 hover:shadow-sm sm:gap-1.5 sm:rounded-xl sm:p-3",
         ring
       )}
     >
-      {/* Mobile: number + label sit on one compact row. Desktop: stacked. */}
-      <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-muted-foreground sm:text-xs sm:order-1">
+      <span className="flex items-center justify-between gap-1">
         <span className={cn("size-1.5 shrink-0 rounded-full", dot)} />
-        <span className="truncate">{label}</span>
+        <Icon className={cn("size-3.5 shrink-0", iconClass)} />
       </span>
-      <span className="ml-auto flex shrink-0 items-center gap-1.5 sm:ml-0 sm:gap-2 sm:order-2 sm:w-full sm:justify-between">
-        <span className="text-base font-semibold leading-none tabular-nums sm:text-2xl">
-          {count}
-        </span>
-        <Icon className={cn("size-3.5 shrink-0 sm:size-4", iconClass)} />
+      <span className="text-base font-semibold leading-none tabular-nums sm:text-xl">
+        {count}
+      </span>
+      <span className="truncate text-[10px] font-medium text-muted-foreground sm:text-xs">
+        {label}
       </span>
     </button>
   );
@@ -204,7 +244,6 @@ const SCOPES = [
   { value: "all", label: "All" },
   { value: "mine", label: "My tasks" },
   { value: "created", label: "Created by me" },
-  { value: "approvals", label: "Approvals" },
   { value: "done-by-me", label: "Completed by me" },
   { value: "drafts", label: "Drafts" },
 ];
@@ -263,7 +302,7 @@ function compareBy(field) {
   };
 }
 
-export function TasksClient({ tasks, currentUser }) {
+export function TasksClient({ tasks, currentUser, initialStatus = "all" }) {
   // Chairman/Director (Owner tier) are never assignees, so the personal
   // "My tasks" / "Completed by me" scopes are always empty for them — hide them.
   const isChair = currentUser.tier === "OWNER";
@@ -292,7 +331,7 @@ export function TasksClient({ tasks, currentUser }) {
 
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState("all");
-  const [status, setStatus] = useState("all");
+  const [status, setStatus] = useState(initialStatus);
   const [priority, setPriority] = useState("all");
   const [sort, setSort] = useState("updated");
   // Time/priority-style sorts feel natural newest/most-urgent first.
@@ -389,7 +428,9 @@ export function TasksClient({ tasks, currentUser }) {
       if (scope === "done-by-me" && !(mine && mine.status === "completed")) return false;
       if (scope === "drafts" && t.status !== "draft") return false;
       if (status === "active") {
-        if (t.status !== "in_progress" && t.status !== "assigned") return false;
+        // Mirrors the "Active" stat card's count above (in progress, not yet
+        // started, or awaiting review) so the number and the filtered list agree.
+        if (!["in_progress", "assigned", "in_review"].includes(t.status)) return false;
       } else if (status !== "all" && t.status !== status) return false;
       if (priority !== "all" && t.priority !== priority) return false;
       if (q && !taskHay.includes(q)) return false;
@@ -409,7 +450,7 @@ export function TasksClient({ tasks, currentUser }) {
       if (scope === "done-by-me" && !(mine && r.status === "completed")) return false;
       if (scope === "drafts") return false; // subtasks are never drafts
       if (status === "active") {
-        if (r.status !== "in_progress" && r.status !== "assigned") return false;
+        if (!["in_progress", "assigned", "in_review"].includes(r.status)) return false;
       } else if (status !== "all" && r.status !== status) return false;
       if (priority !== "all" && r.priority !== priority) return false;
       if (q && !subHay.includes(q)) return false;
@@ -519,18 +560,32 @@ export function TasksClient({ tasks, currentUser }) {
             Live
           </span>
         </div>
-        <div className="relative grid grid-cols-2 gap-1.5 sm:grid-cols-4 sm:gap-2">
-          {STAT_CARDS.map((card) => (
-            <StatCard
-              key={card.key}
-              card={card}
-              count={card.statuses.reduce((n, s) => n + (counts[s] || 0), 0)}
-              active={status === card.key}
-              onClick={() =>
-                setStatus((s) => (s === card.key ? "all" : card.key))
-              }
-            />
-          ))}
+        <div className="relative flex flex-wrap gap-1 sm:grid sm:grid-cols-5 sm:gap-2">
+          {STAT_CARDS.map((card) =>
+            card.kind === "scope" ? (
+              <div key={card.key} className="flex-1 basis-[30%]">
+                <StatCard
+                  card={card}
+                  count={approvalCount}
+                  active={scope === card.key}
+                  onClick={() =>
+                    setScope((s) => (s === card.key ? "all" : card.key))
+                  }
+                />
+              </div>
+            ) : (
+              <div key={card.key} className="flex-1 basis-[30%]">
+                <StatCard
+                  card={card}
+                  count={card.statuses.reduce((n, s) => n + (counts[s] || 0), 0)}
+                  active={status === card.key}
+                  onClick={() =>
+                    setStatus((s) => (s === card.key ? "all" : card.key))
+                  }
+                />
+              </div>
+            )
+          )}
         </div>
       </div>
 
@@ -545,9 +600,6 @@ export function TasksClient({ tasks, currentUser }) {
             {scopes.map((s) => (
               <SelectItem key={s.value} value={s.value}>
                 {s.label}
-                {s.value === "approvals" && approvalCount > 0
-                  ? ` (${approvalCount})`
-                  : ""}
               </SelectItem>
             ))}
           </SelectContent>
@@ -561,11 +613,6 @@ export function TasksClient({ tasks, currentUser }) {
                 className="cursor-pointer rounded-md px-3 py-1.5 hover:bg-background/60 data-active:shadow-sm"
               >
                 {s.label}
-                {s.value === "approvals" && approvalCount > 0 && (
-                  <span className="ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full bg-violet-500/15 px-1 text-[10px] font-semibold text-violet-700 tabular-nums dark:text-violet-400">
-                    {approvalCount}
-                  </span>
-                )}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -590,6 +637,24 @@ export function TasksClient({ tasks, currentUser }) {
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Exact-status filter — the stat cards above only cover the common
+              groups (Active/Delayed/Completed/Cancelled); this covers every
+              individual status (e.g. just Assigned, or just In review) so
+              nothing is only reachable by a hand-built URL. */}
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger className="min-w-30 flex-1 sm:w-40 sm:flex-none">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              {TASK_STATUSES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {STATUS_META[s].label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           <Select value={priority} onValueChange={setPriority}>
             <SelectTrigger className="min-w-30 flex-1 sm:w-36 sm:flex-none">
               <SelectValue placeholder="Priority" />
@@ -665,10 +730,10 @@ export function TasksClient({ tasks, currentUser }) {
         </div>
       ) : (
         <>
-        <div ref={listTopRef} className="overflow-x-auto rounded-xl border bg-card">
-          <div className="min-w-[680px]">
-            {/* Column header */}
-            <div className="flex items-center gap-3 border-b bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground sm:px-4">
+        <div ref={listTopRef} className="rounded-xl border bg-muted/20 sm:overflow-x-auto">
+          <div className="sm:min-w-[680px]">
+            {/* Column header — desktop table only; mobile renders stacked cards instead */}
+            <div className="hidden items-center gap-3 border-b bg-muted/40 px-4 py-2 text-xs font-medium text-muted-foreground sm:flex">
               <span className="flex-1">Issue</span>
               <span className="w-28 shrink-0">Status</span>
               <span className="w-24 shrink-0">Due</span>
@@ -676,9 +741,10 @@ export function TasksClient({ tasks, currentUser }) {
               <span className="w-20 shrink-0">People</span>
               <span className="w-20 shrink-0">Subtasks</span>
             </div>
-            {/* A steady minimum height keeps the panel the same size on short and
-                full pages, so it looks balanced rather than jumping around. */}
-            <ul className="min-h-88 divide-y">
+            {/* Each task is its own bordered card with breathing room between
+                rows, so adjacent tasks — and a task versus its nested
+                subtasks — are unmistakably separate at a glance. */}
+            <ul className="min-h-88 space-y-2 p-2 sm:space-y-2.5 sm:p-3">
               {pageItems.map((t) => {
                 const subs = t.subtasks || [];
                 const hasSubs = subs.length > 0;
@@ -686,15 +752,22 @@ export function TasksClient({ tasks, currentUser }) {
                 const open = hasSubs && (expanded.has(t.id) || autoExpand.has(t.id));
                 const desc = searchIndex.get(t.id)?.descSnippet || "";
                 return (
-                  <li key={t.id} className={cn(open && "bg-muted/20")}>
+                  <li
+                    key={t.id}
+                    className={cn(
+                      "overflow-hidden rounded-lg border bg-card transition-colors",
+                      open ? "border-primary/30 shadow-sm" : "hover:border-foreground/25"
+                    )}
+                  >
                     {/* Parent row — the whole row navigates via the stretched
-                        link; the Subtasks cell sits above it to toggle expand. */}
-                    <div className="group/row relative flex items-center gap-3 px-3 py-3 transition-colors hover:bg-accent/60 sm:px-4">
+                        link; the Subtasks cell sits above it to toggle expand.
+                        Desktop only; mobile renders the card below instead. */}
+                    <div className="group/row relative hidden items-center gap-3 px-4 py-3 transition-colors hover:bg-accent/60 sm:flex">
                       <Link href={`/tasks/${t.key}`} className="absolute inset-0 z-[1]">
                         <span className="sr-only">Open {t.title}</span>
                       </Link>
                       <div className="min-w-0 flex-1">
-                        <span className="block truncate font-medium">{t.title}</span>
+                        <span className="block truncate font-semibold">{t.title}</span>
                         <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                           <span className="font-mono text-[11px] text-muted-foreground">
                             {t.key}
@@ -777,69 +850,140 @@ export function TasksClient({ tasks, currentUser }) {
                       </div>
                     </div>
 
-                    {/* Nested subtasks — same columns, indented with a tree rail
-                        so they clearly read as children of the task above. */}
+                    {/* Parent card — mobile only. Same info as the desktop row,
+                        stacked instead of columned so nothing needs to scroll. */}
+                    <div className="group/row relative flex flex-col gap-2 p-3 transition-colors active:bg-accent/40 sm:hidden">
+                      <Link href={`/tasks/${t.key}`} className="absolute inset-0 z-[1]">
+                        <span className="sr-only">Open {t.title}</span>
+                      </Link>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <span className="block truncate font-semibold">{t.title}</span>
+                          <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                            <span className="font-mono text-[11px] text-muted-foreground">
+                              {t.key}
+                            </span>
+                            <RecurringBadge
+                              recurrence={t.recurrence}
+                              className="relative z-2 gap-0.5 px-1 py-0 text-[10px]"
+                            />
+                          </span>
+                        </div>
+                        <div className="shrink-0">
+                          <StatusBadge status={t.status} />
+                        </div>
+                      </div>
+                      {desc && (
+                        <span className="line-clamp-1 text-xs text-muted-foreground/80">
+                          {desc}
+                        </span>
+                      )}
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                        <PriorityBadge priority={t.priority} />
+                        {t.dueDate && (
+                          <span
+                            className={cn(
+                              t.delayed
+                                ? "font-medium text-rose-600 dark:text-rose-400"
+                                : "text-muted-foreground"
+                            )}
+                          >
+                            {formatDate(t.dueDate)}
+                            {t.delayed && t.daysLate > 0 ? ` · ${t.daysLate}d late` : ""}
+                          </span>
+                        )}
+                        <AssigneeStack task={t} />
+                        {t.assignerName && (
+                          <span className="text-muted-foreground">by {t.assignerName}</span>
+                        )}
+                      </div>
+                      {hasSubs && (
+                        <button
+                          type="button"
+                          onClick={() => toggleExpanded(t.id)}
+                          aria-expanded={open}
+                          aria-label={
+                            open
+                              ? "Hide subtasks"
+                              : `Show ${subs.length} subtasks, ${doneSubs} done`
+                          }
+                          className="relative z-[2] -mx-1 mt-0.5 flex items-center justify-between rounded-md border border-transparent px-1 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-foreground"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <ListTree className="size-3.5" />
+                            <span className="tabular-nums">
+                              {doneSubs}/{subs.length}
+                            </span>{" "}
+                            subtasks
+                          </span>
+                          <ChevronDown
+                            className={cn(
+                              "size-3.5 transition-transform",
+                              open && "rotate-180"
+                            )}
+                          />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Nested subtasks — a compact checklist rather than a
+                        second mini-table, so it reads as a clearly different,
+                        lighter-weight kind of row instead of a smaller task. */}
                     {open && (
-                      <div className="relative border-t bg-muted/20">
-                        <span
-                          aria-hidden
-                          className="pointer-events-none absolute inset-y-0 left-8 w-px bg-border sm:left-12"
-                        />
-                        <ul className="divide-y divide-border/40">
+                      <div className="border-t bg-muted/50 px-2 py-2 dark:bg-muted/20 sm:px-3">
+                        <p className="mb-1 px-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                          Subtasks
+                        </p>
+                        <ul>
                           {subs.map((s) => {
                             const r = subtaskToRow(t, s);
+                            const assignee = r.assignees[0];
                             return (
-                              <li key={r.id} className="group/sub relative">
-                                <Link href={r.href} className="absolute inset-0 z-[1]">
-                                  <span className="sr-only">Open {r.title}</span>
-                                </Link>
-                                <div className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-accent/40 sm:px-4">
-                                  <div className="flex min-w-0 flex-1 items-center gap-2 pl-6 sm:pl-9">
-                                    <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground/60" />
-                                    <div className="min-w-0">
-                                      <span className="block truncate text-sm font-medium">
-                                        {r.title}
-                                      </span>
-                                      <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground">
-                                        {r.key}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <div className="w-28 shrink-0">
-                                    <StatusBadge status={r.status} />
-                                  </div>
-                                  <div className="w-24 shrink-0">
-                                    {r.dueDate ? (
-                                      <>
-                                        <span
-                                          className={cn(
-                                            "text-xs",
-                                            r.delayed
-                                              ? "font-medium text-rose-600 dark:text-rose-400"
-                                              : "text-muted-foreground"
-                                          )}
-                                        >
-                                          {formatDate(r.dueDate)}
-                                        </span>
-                                        {r.delayed && r.daysLate > 0 && (
-                                          <span className="block text-[10px] font-medium text-rose-600 dark:text-rose-400">
-                                            {r.daysLate}d late
-                                          </span>
-                                        )}
-                                      </>
-                                    ) : (
-                                      <span className="text-xs text-muted-foreground/50">—</span>
+                              <li key={r.id}>
+                                <Link
+                                  href={r.href}
+                                  className="flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors hover:bg-background"
+                                >
+                                  <SubtaskStatusIcon status={r.status} />
+                                  <span
+                                    className={cn(
+                                      "min-w-0 flex-1 truncate text-sm",
+                                      r.status === "completed" &&
+                                        "text-muted-foreground line-through"
                                     )}
-                                  </div>
-                                  <div className="w-24 shrink-0">
-                                    <PriorityBadge priority={r.priority} />
-                                  </div>
-                                  <div className="w-20 shrink-0">
-                                    <AssigneeStack task={r} />
-                                  </div>
-                                  {/* Subtasks column — subtasks have none */}
-                                  <div className="w-20 shrink-0" />
-                                </div>
+                                  >
+                                    {r.title}
+                                  </span>
+                                  <span
+                                    title={`${PRIORITY_META[r.priority].label} priority`}
+                                    className={cn(
+                                      "size-1.5 shrink-0 rounded-full",
+                                      PRIORITY_META[r.priority].dotClass
+                                    )}
+                                  />
+                                  <span className="hidden shrink-0 font-mono text-[11px] text-muted-foreground sm:inline">
+                                    {r.key}
+                                  </span>
+                                  {r.dueDate && (
+                                    <span
+                                      className={cn(
+                                        "hidden shrink-0 text-xs sm:inline",
+                                        r.delayed
+                                          ? "font-medium text-rose-600 dark:text-rose-400"
+                                          : "text-muted-foreground"
+                                      )}
+                                    >
+                                      {formatDate(r.dueDate)}
+                                    </span>
+                                  )}
+                                  {assignee && (
+                                    <Avatar className="size-5 shrink-0" title={assignee.name}>
+                                      <AvatarFallback className="bg-primary/10 text-[9px] text-primary">
+                                        {getInitials(assignee.name)}
+                                      </AvatarFallback>
+                                    </Avatar>
+                                  )}
+                                </Link>
                               </li>
                             );
                           })}

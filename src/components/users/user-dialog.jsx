@@ -99,6 +99,7 @@ export function UserDialog({
           }
         : {
             name: values.name,
+            email: values.email,
             role: values.role,
             department: values.department,
             phone: values.phone,
@@ -133,7 +134,7 @@ export function UserDialog({
           </DialogTitle>
           <DialogDescription>
             {mode === "create"
-              ? "Create an account. The member signs in with the email and password you set."
+              ? "Create an account. Leave the password blank to default it to the member's email — they'll be asked to change it on first sign-in."
               : "Update this member's details and access."}
           </DialogDescription>
         </DialogHeader>
@@ -147,38 +148,43 @@ export function UserDialog({
             )}
           </div>
 
-          {mode === "create" && (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  {...register("email")}
-                  aria-invalid={!!errors.email}
-                />
-                {errors.email && (
-                  <p className="text-sm text-destructive">
-                    {errors.email.message}
-                  </p>
-                )}
-              </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                {...register("email")}
+                aria-invalid={!!errors.email}
+              />
+              {errors.email && (
+                <p className="text-sm text-destructive">
+                  {errors.email.message}
+                </p>
+              )}
+            </div>
+            {mode === "create" && (
               <div className="space-y-2">
                 <Label htmlFor="password">Temporary password</Label>
                 <Input
                   id="password"
                   type="text"
+                  placeholder="Blank = their email"
                   {...register("password")}
                   aria-invalid={!!errors.password}
                 />
-                {errors.password && (
+                {errors.password ? (
                   <p className="text-sm text-destructive">
                     {errors.password.message}
                   </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Leave blank to default to their email address.
+                  </p>
                 )}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           <div className="space-y-2">
             <Label htmlFor="role">Role</Label>
@@ -208,10 +214,10 @@ export function UserDialog({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="department">Department</Label>
+              <Label htmlFor="department">Department / Subjects</Label>
               <Input
                 id="department"
-                placeholder="e.g. Science"
+                placeholder="e.g. Science, or Mathematics, Computer"
                 {...register("department")}
               />
             </div>

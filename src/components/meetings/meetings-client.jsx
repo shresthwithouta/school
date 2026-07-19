@@ -59,7 +59,7 @@ export function MeetingsClient({
               href={`/meetings/${m.key}`}
               className="block rounded-xl border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-accent/40"
             >
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <Badge
@@ -73,17 +73,17 @@ export function MeetingsClient({
                       {m.status === "completed" ? "Completed" : "Scheduled"}
                     </Badge>
                   </div>
-                  <h3 className="mt-2 truncate font-medium">{m.title}</h3>
+                  <h3 className="mt-2 wrap-break-word font-medium">{m.title}</h3>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     by {m.createdByName}
                   </p>
                 </div>
-                <div className="flex shrink-0 flex-col items-end gap-2 text-xs text-muted-foreground">
-                  <span className="inline-flex items-center gap-1">
+                <div className="flex flex-row flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground sm:shrink-0 sm:flex-col sm:items-end sm:gap-2">
+                  <span className="inline-flex items-center gap-1 whitespace-nowrap">
                     <CalendarClock className="size-3.5" />
                     {m.scheduledAt ? formatDateTime(m.scheduledAt) : "No time set"}
                   </span>
-                  <span className="inline-flex items-center gap-1">
+                  <span className="inline-flex items-center gap-1 whitespace-nowrap">
                     <Users className="size-3.5" />
                     {m.joinedCount}/{m.invitedCount} joined
                     {m.maxAttendees ? ` · max ${m.maxAttendees}` : ""}

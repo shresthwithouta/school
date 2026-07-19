@@ -6,10 +6,15 @@ import { after } from "next/server";
 import { connectToDatabase, stripMongo } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { cleanHtml } from "@/lib/sanitize";
-import { emailMeetingInvite, emailMeetingInviteGroup } from "@/lib/email";
-import { pushMeetingInvite } from "@/lib/push";
+import {
+  emailMeetingInvite,
+  emailMeetingInviteGroup,
+  emailMeetingReminder,
+} from "@/lib/email";
+import { pushMeetingInvite, pushMeetingReminder } from "@/lib/push";
 import { canManage, isOwner } from "@/lib/rbac";
 import { listVisibleUsers } from "@/lib/users";
+import { store } from "@/lib/store";
 import { destroyAsset } from "@/lib/cloudinary";
 import Meeting from "@/models/Meeting";
 
@@ -78,6 +83,19 @@ const REV = Symbol("rev");
 
 function now() {
   return new Date().toISOString();
+}
+
+const HOUR_MS = 3_600_000;
+// How far ahead of the start time the "starting soon" reminder fires (see
+// sendMeetingReminders).
+const REMINDER_WINDOW_MS = HOUR_MS;
+
+/** "38 minutes" / "1 hour" — the time-left label used in the reminder. */
+function formatStartsIn(msLeft) {
+  const mins = Math.max(1, Math.round(msLeft / 60_000));
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"}`;
+  const hours = Math.round(mins / 60);
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
 }
 
 function normalize(m) {
@@ -282,8 +300,8 @@ export async function getMeetingForActor(
 // a single email to the organizer with everyone in CC, so the group can see who
 // else is invited (instead of N isolated emails). Always carries the schedule
 // and the join link. Each invitee also gets a web-push notification (best-effort
-// — no-ops when VAPID isn't configured). `recipients` is [{ id, email, name }]
-// and excludes the actor.
+// — no-ops when VAPID isn't configured). `recipients` is [{ id, email, name }],
+// including the actor if they invited themselves.
 function sendInviteNotifications(actor, meeting, recipients) {
   const valid = recipients.filter((r) => r.email || r.id);
   if (valid.length === 0) return Promise.resolve();
@@ -370,12 +388,14 @@ export async function createMeeting(
 
   await save(meeting);
 
-  // Notify invitees best-effort, after the response is sent — never block the
-  // save on a burst of SMTP handshakes. One group email (organizer + CC) when
-  // there's more than one invitee.
-  const invites = attendees
-    .filter((a) => a.id !== actor.id)
-    .map((a) => ({ id: a.id, email: allowed.get(a.id)?.email, name: a.name }));
+  // Notify invitees, including the actor if they invited themselves, best-effort,
+  // after the response is sent — never block the save on a burst of SMTP
+  // handshakes. One group email (organizer + CC) when there's more than one invitee.
+  const invites = attendees.map((a) => ({
+    id: a.id,
+    email: allowed.get(a.id)?.email,
+    name: a.name,
+  }));
   if (invites.length) {
     after(() => sendInviteNotifications(actor, meeting, invites));
   }
@@ -398,9 +418,10 @@ export async function updateMeeting(
   if (input.description !== undefined) m.description = cleanHtml(input.description);
   if (input.link !== undefined) m.link = (input.link ?? "").trim();
   if (input.scheduledAt !== undefined) {
-    m.scheduledAt = input.scheduledAt
-      ? new Date(input.scheduledAt).toISOString()
-      : null;
+    const next = input.scheduledAt ? new Date(input.scheduledAt).toISOString() : null;
+    // A moved time should be able to trigger a fresh "starting soon" reminder.
+    if (next !== m.scheduledAt) m.reminderSent = false;
+    m.scheduledAt = next;
   }
   if (input.maxAttendees !== undefined) {
     m.maxAttendees = input.maxAttendees > 0 ? input.maxAttendees : null;
@@ -416,7 +437,7 @@ export async function updateMeeting(
       const cur = existing.get(cid);
       if (cur) return cur;
       const u = allowed.get(cid);
-      if (u.id !== actor.id) newlyInvited.push({ id: u.id, email: u.email, name: u.name });
+      newlyInvited.push({ id: u.id, email: u.email, name: u.name });
       return { id: u.id, name: u.name, role: u.role, status: "invited", joinedAt: null };
     });
   }
@@ -597,4 +618,66 @@ export async function deleteMeeting(actor, id) {
   await Promise.allSettled(
     assets.map((a) => destroyAsset(a.publicId, a.resourceType))
   );
+}
+
+// ── Upcoming-meeting reminders ─────────────────────────────────────────
+// Frequent sweep (see /api/cron/reminders): emails + pushes every attendee of
+// a scheduled meeting whose start time falls within the next
+// REMINDER_WINDOW_MS. `reminderSent` stamps the meeting once so re-running the
+// sweep never double-sends; moving the start time clears it (see
+// updateMeeting). Best-effort — one bad doc doesn't abort the sweep.
+export async function sendMeetingReminders() {
+  await connectToDatabase();
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const windowEndIso = new Date(nowMs + REMINDER_WINDOW_MS).toISOString();
+
+  const docs = await Meeting.find({
+    status: "scheduled",
+    reminderSent: { $ne: true },
+    scheduledAt: { $gt: nowIso, $lte: windowEndIso },
+  })
+    .lean()
+    .exec();
+
+  let reminded = 0;
+  const errors = [];
+  for (const doc of docs) {
+    try {
+      const m = stripMongo(doc);
+      normalize(m);
+      const msLeft = new Date(m.scheduledAt).getTime() - nowMs;
+      const startsInLabel = formatStartsIn(msLeft);
+      const when = new Date(m.scheduledAt).toLocaleString("en-GB");
+
+      for (const a of m.attendees) {
+        const u = await store.findById(a.id);
+        if (!u) continue;
+        await Promise.allSettled([
+          u.email &&
+            emailMeetingReminder({
+              to: u.email,
+              attendeeName: a.name,
+              title: m.title,
+              meetingId: m.id,
+              startsInLabel,
+              when,
+              link: m.link || "",
+            }),
+          pushMeetingReminder({
+            userId: a.id,
+            title: m.title,
+            meetingId: m.id,
+            startsInLabel,
+          }),
+        ]);
+        reminded++;
+      }
+
+      await Meeting.updateOne({ id: m.id }, { $set: { reminderSent: true } });
+    } catch (err) {
+      errors.push({ id: doc.id, error: err?.message || String(err) });
+    }
+  }
+  return { reminded, considered: docs.length, errors };
 }

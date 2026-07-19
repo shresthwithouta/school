@@ -15,6 +15,9 @@ import { cn, formatDateTime, getInitials, toPlainText } from "@/lib/utils";
 const MAX_INDENT = 4;
 // A comment that mentions someone must be a real message (matches the server).
 const MENTION_MIN_CHARS = 50;
+// Top-level comment threads are collapsed to the most recent entries by
+// default, expandable via "See all" — a long-lived task can pick up dozens.
+const ROOT_PAGE_SIZE = 6;
 
 function PendingAtts({ items, onRemove }) {
   if (items.length === 0) return null;
@@ -140,6 +143,8 @@ const CommentNode = memo(function CommentNode({ comment, depth, childrenOf, ctx 
     participants,
     currentUserId,
     isCreator,
+    onSaveAttachment,
+    savingAttachmentId,
   } = ctx;
   const replies = childrenOf.get(comment.id) ?? [];
   const isFeedback = comment.kind === "feedback";
@@ -198,7 +203,11 @@ const CommentNode = memo(function CommentNode({ comment, depth, childrenOf, ctx 
             <RichText html={comment.text} className="mt-1 text-muted-foreground" />
             {comment.attachments?.length > 0 && (
               <div className="mt-2">
-                <AttachmentList attachments={comment.attachments} />
+                <AttachmentList
+                  attachments={comment.attachments}
+                  onSave={onSaveAttachment}
+                  savingId={savingAttachmentId}
+                />
               </div>
             )}
           </div>
@@ -255,10 +264,13 @@ export function CommentThread({
   participants = [],
   currentUser,
   isCreator = false,
+  onSaveAttachment,
+  savingAttachmentId,
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(null);
   const [replyTo, setReplyTo] = useState(null);
+  const [showAllRoots, setShowAllRoots] = useState(false);
 
   const nameOf = useMemo(
     () => new Map(participants.map((p) => [p.id, p.name])),
@@ -324,8 +336,20 @@ export function CommentThread({
       participants,
       currentUserId,
       isCreator,
+      onSaveAttachment,
+      savingAttachmentId,
     }),
-    [replyTo, busy, post, nameOf, participants, currentUserId, isCreator]
+    [
+      replyTo,
+      busy,
+      post,
+      nameOf,
+      participants,
+      currentUserId,
+      isCreator,
+      onSaveAttachment,
+      savingAttachmentId,
+    ]
   );
 
   return (
@@ -334,7 +358,7 @@ export function CommentThread({
         <p className="text-sm text-muted-foreground">No comments yet.</p>
       ) : (
         <div className="space-y-3">
-          {roots.map((c) => (
+          {(showAllRoots ? roots : roots.slice(-ROOT_PAGE_SIZE)).map((c) => (
             <CommentNode
               key={c.id}
               comment={c}
@@ -343,6 +367,16 @@ export function CommentThread({
               ctx={ctx}
             />
           ))}
+          {roots.length > ROOT_PAGE_SIZE && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              onClick={() => setShowAllRoots((v) => !v)}
+            >
+              {showAllRoots ? "Show less" : `See all comments (${roots.length})`}
+            </Button>
+          )}
         </div>
       )}
 

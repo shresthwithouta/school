@@ -4,32 +4,30 @@
  *
  *   npm run seed:staff
  *
- * Every account gets the same temporary password and mustChangePassword=true.
+ * Each account's temporary password defaults to the member's own email
+ * address (matches createUser in lib/users.js), with mustChangePassword=true
+ * so they're nudged to pick their own after signing in.
  */
 import mongoose from "mongoose";
 import dns from "dns";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 
-// Shared temporary password for every new account (>= 8 chars). Members should
-// change it after first login (Settings → Password).
-const PASSWORD = "School@2026";
-
 // Maps the free-text "Designation" from the form to a canonical app role
 // (see src/lib/rbac.js ROLES).
 const ROLE_MAP = {
   Teacher: "Teacher",
-  "Office Staff": "Other Staff",
-  Other: "Other Staff",
-  Director: "Chairman/Director", // Owner tier — sees & manages everyone
-  Principal: "Principal",
+  "Office Staff": "Staff",
+  Other: "Staff",
+  Director: "Admin", // Owner tier — sees & manages everyone
+  Principal: "Manager",
 };
 
 // Fallback department when the person gave no subject/specialty.
 const DEPT_DEFAULT = {
-  "Chairman/Director": "Management",
-  Principal: "Administration",
-  "Other Staff": "Office",
+  Admin: "Management",
+  Manager: "Administration",
+  Staff: "Office",
   Teacher: "",
 };
 
@@ -112,7 +110,6 @@ const User = mongoose.models.User || mongoose.model("User", UserSchema);
 async function main() {
   await mongoose.connect(uri, { serverSelectionTimeoutMS: 20000 });
 
-  const passwordHash = bcrypt.hashSync(PASSWORD, 10);
   const created = [];
   const skipped = [];
 
@@ -133,6 +130,7 @@ async function main() {
     const department = clean(s.subjects) || DEPT_DEFAULT[role] || "";
     const bio = clean(s.info);
     const now = new Date().toISOString();
+    const passwordHash = bcrypt.hashSync(email, 10);
 
     await User.create({
       id: crypto.randomUUID(),
@@ -155,7 +153,7 @@ async function main() {
 
   console.log(`\n✓ Created ${created.length} account(s); skipped ${skipped.length}.`);
   if (created.length) {
-    console.log(`\nShared temporary password for all new accounts: ${PASSWORD}`);
+    console.log("\nEach account's temporary password is their own email address.");
     console.log("(mustChangePassword is set — ask each person to change it in Settings.)\n");
     console.log("Created accounts:");
     for (const c of created) {

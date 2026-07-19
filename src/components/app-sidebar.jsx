@@ -30,15 +30,16 @@ function isActive(pathname, href) {
 
 export function AppSidebar({ user }) {
   const pathname = usePathname();
-  const { toggleSidebar } = useSidebar();
+  const { toggleSidebar, isMobile, setOpenMobile } = useSidebar();
   const sections = navForRole(user.role);
+  const closeOnMobile = () => isMobile && setOpenMobile(false);
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild>
+            <SidebarMenuButton size="lg" asChild onClick={closeOnMobile}>
               <Link href="/dashboard">
                 <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                   <GraduationCap className="size-5" />
@@ -67,6 +68,7 @@ export function AppSidebar({ user }) {
                       asChild
                       isActive={isActive(pathname, item.href)}
                       tooltip={item.title}
+                      onClick={closeOnMobile}
                     >
                       <Link href={item.href}>
                         <item.icon />
