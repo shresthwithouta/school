@@ -98,7 +98,12 @@ export function TaskPageClient({ task, assignees, currentUser }) {
   const canReview = canEdit || isManager;
   const isClosed = task.status === "completed" || task.status === "cancelled";
   // An assignee submits their part for review (with a note) when it's still open.
-  const canSubmit = !isClosed && !!mine && (mine.status === "assigned" || mine.status === "in_progress");
+  // Reviewer can also submit the remaining active work for all assignees.
+  const hasEligibleAssignees = task.assignees.some((a) => a.status === "assigned" || a.status === "in_progress");
+  const canSubmit = !isClosed && (
+    (!!mine && (mine.status === "assigned" || mine.status === "in_progress")) ||
+    (canReview && hasEligibleAssignees)
+  );
 
   // Jira-style status switcher options (each maps to a transition action). A
   // closed task only offers Reopen; an open one offers the work transitions.
@@ -681,6 +686,43 @@ export function TaskPageClient({ task, assignees, currentUser }) {
                     Submitted — awaiting review
                   </p>
                 )}
+                {canReview && task.assignees.some((a) => a.status === "submitted") && (
+                  <div className="mt-2 space-y-2 border-t pt-2">
+                    <p className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">Acceptance</p>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        className="flex-1"
+                        disabled={!!busy}
+                        onClick={() =>
+                          api(
+                            `/api/tasks/${task.id}/transition`,
+                            "POST",
+                            { action: "approve" },
+                            "review"
+                          )
+                        }
+                      >
+                        <Check className="size-4" />
+                        Approve
+                      </Button>
+                      <SendBackDialog
+                        taskId={task.id}
+                        trigger={
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="flex-1 text-amber-600 dark:text-amber-400"
+                            disabled={!!busy}
+                          >
+                            <Undo2 className="size-4" />
+                            Send back
+                          </Button>
+                        }
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
               <Detail label="Assigned by" value={task.assignerName} sub={task.assignerRole} />
               <Detail
@@ -750,46 +792,6 @@ export function TaskPageClient({ task, assignees, currentUser }) {
                           </button>
                         )}
                       </div>
-                      {reviewable && (
-                        <div className="mt-2 space-y-2 border-t pt-2">
-                          <p className="text-xs text-muted-foreground">
-                            {a.name} submitted their work for review.
-                          </p>
-                          <div className="flex gap-2">
-                            <Button
-                              size="sm"
-                              className="flex-1"
-                              disabled={!!busy}
-                              onClick={() =>
-                                api(
-                                  `/api/tasks/${task.id}/transition`,
-                                  "POST",
-                                  { action: "approve", assigneeId: a.id },
-                                  "review"
-                                )
-                              }
-                            >
-                              <Check className="size-4" />
-                              Approve
-                            </Button>
-                            <SendBackDialog
-                              taskId={task.id}
-                              assignee={a}
-                              trigger={
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="flex-1 text-amber-600 dark:text-amber-400"
-                                  disabled={!!busy}
-                                >
-                                  <Undo2 className="size-4" />
-                                  Send back
-                                </Button>
-                              }
-                            />
-                          </div>
-                        </div>
-                      )}
                     </li>
                   );
                 })}

@@ -1303,9 +1303,27 @@ export async function transitionTask(
     // Assignees no longer close their own work — they submit it for review with
     // a note (required) and optional private files; the assigner is notified.
     case "submit": {
-      if (!mine || mine.status === "completed" || mine.status === "submitted") {
-        throw new AppError("You cannot submit this task right now.", 400);
+      const isReviewer = canReviewTask(actor, task);
+      const targets = input.assigneeId
+        ? task.assignees.filter((a) => a.id === input.assigneeId)
+        : (isReviewer
+            ? task.assignees.filter((a) => a.status === "assigned" || a.status === "in_progress")
+            : [mine].filter(Boolean));
+
+      if (targets.length === 0) {
+        throw new AppError("No eligible assignees found to submit.", 400);
       }
+
+      // Permissions check:
+      for (const target of targets) {
+        if (target.id !== actor.id && !isReviewer) {
+          throw new AppError("Only the assignee, the task creator, or an admin can submit this task for review.", 403);
+        }
+        if (target.status === "completed" || target.status === "submitted") {
+          throw new AppError("You cannot submit this task right now.", 400);
+        }
+      }
+
       // A task can only go up for review once all its subtasks are closed.
       if ((task.subtasks || []).some((s) => s.status !== "done")) {
         throw new AppError(
@@ -1318,16 +1336,26 @@ export async function transitionTask(
         throw new AppError("Add a short note describing what you're submitting.", 400);
       }
       const atts = (input.attachments ?? []).map((a) => buildAttachment(actor, a));
-      mine.status = "submitted";
-      mine.submittedAt = now();
+
+      for (const target of targets) {
+        target.status = "submitted";
+        target.submittedAt = now();
+      }
+
       // The submission (note + files) is private: only the submitter, the task
       // creator and management reviewers can see it (see canSeeComment).
+      const targetIds = targets.map((t) => t.id);
       pushComment(input.note, "submission", {
         attachments: atts,
         visibility: "private",
-        audienceIds: [task.assignerId],
+        audienceIds: [task.assignerId, ...targetIds],
       });
-      task.activity.push(activity(actor, "submitted their part for review"));
+
+      const names = targets.map((t) => t.name).join(", ");
+      const actorLabel = targets.length === 1 && targets[0].id === actor.id
+        ? "their part"
+        : `work on behalf of ${names}`;
+      task.activity.push(activity(actor, `submitted ${actorLabel} for review`));
       notifySubmitTo = task.assignerId;
       break;
     }
@@ -1336,15 +1364,26 @@ export async function transitionTask(
       if (!reviewer) {
         throw new AppError("Only the task creator or a manager can approve work.", 403);
       }
-      const target = task.assignees.find((a) => a.id === input.assigneeId);
-      if (!target) throw new AppError("Choose whose submission to approve.", 400);
-      if (target.status !== "submitted") {
-        throw new AppError("That person hasn't submitted work to approve.", 400);
+      const targets = input.assigneeId
+        ? task.assignees.filter((a) => a.id === input.assigneeId)
+        : task.assignees.filter((a) => a.status === "submitted");
+
+      if (targets.length === 0) {
+        throw new AppError("No submitted work found to approve.", 400);
       }
-      target.status = "completed";
-      target.completedAt = now();
+
+      for (const target of targets) {
+        target.status = "completed";
+        target.completedAt = now();
+      }
+
       if (input.note) pushComment(input.note, "feedback");
-      task.activity.push(activity(actor, `approved ${target.name}'s submission`));
+      
+      const names = targets.map((t) => t.name).join(", ");
+      const activityMsg = targets.length === 1
+        ? `approved ${targets[0].name}'s submission`
+        : `approved submissions for ${names}`;
+      task.activity.push(activity(actor, activityMsg));
       break;
     }
     // Reviewer sends a submitted part back for changes → in_progress.
@@ -1352,19 +1391,35 @@ export async function transitionTask(
       if (!reviewer) {
         throw new AppError("Only the task creator or a manager can send work back.", 403);
       }
-      const target = task.assignees.find((a) => a.id === input.assigneeId);
-      if (!target) throw new AppError("Choose whose submission to send back.", 400);
-      if (target.status !== "submitted") {
-        throw new AppError("That person hasn't submitted work to send back.", 400);
+      const targets = input.assigneeId
+        ? task.assignees.filter((a) => a.id === input.assigneeId)
+        : task.assignees.filter((a) => a.status === "submitted");
+
+      if (targets.length === 0) {
+        throw new AppError("No submitted work found to send back.", 400);
       }
-      target.status = "in_progress";
-      target.completedAt = null;
+
+      for (const target of targets) {
+        target.status = "in_progress";
+        target.completedAt = null;
+      }
+
       if (input.note) pushComment(input.note, "feedback");
-      task.activity.push(
-        activity(actor, `sent ${target.name}'s submission back for changes`)
-      );
-      if (target.id !== actor.id) {
-        notifyReturnTo = { id: target.id, reason: input.note || "" };
+
+      const names = targets.map((t) => t.name).join(", ");
+      const activityMsg = targets.length === 1
+        ? `sent ${targets[0].name}'s submission back for changes`
+        : `sent submissions back for changes for ${names}`;
+      task.activity.push(activity(actor, activityMsg));
+
+      const notifyUsers = [];
+      for (const target of targets) {
+        if (target.id !== actor.id) {
+          notifyUsers.push(target.id);
+        }
+      }
+      if (notifyUsers.length > 0) {
+        notifyReturnTo = notifyUsers.map((id) => ({ id, reason: input.note || "" }));
       }
       break;
     }
@@ -1433,16 +1488,19 @@ export async function transitionTask(
           }
         }
         if (notifyReturnTo) {
-          const u = await store.findById(notifyReturnTo.id);
-          if (u && u.email) {
-            await emailSubmissionReturned({
-              to: u.email,
-              assigneeName: u.name,
-              byName: actor.name,
-              taskTitle: task.title,
-              taskId: task.id,
-              reason: notifyReturnTo.reason,
-            });
+          const list = Array.isArray(notifyReturnTo) ? notifyReturnTo : [notifyReturnTo];
+          for (const item of list) {
+            const u = await store.findById(item.id);
+            if (u && u.email) {
+              await emailSubmissionReturned({
+                to: u.email,
+                assigneeName: u.name,
+                byName: actor.name,
+                taskTitle: task.title,
+                taskId: task.id,
+                reason: item.reason,
+              });
+            }
           }
         }
         if (completedNow) {

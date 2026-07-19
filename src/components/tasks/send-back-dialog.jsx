@@ -35,15 +35,19 @@ export function SendBackDialog({ taskId, assignee, trigger }) {
     const res = await fetch(`/api/tasks/${taskId}/transition`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "sendback", assigneeId: assignee.id, note }),
+      body: JSON.stringify({ action: "sendback", assigneeId: assignee?.id || undefined, note }),
     });
     const data = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) {
-      toast.error(data.error ?? "Could not send this back");
+      toast.error(data.error ?? "Could not send back");
       return;
     }
-    toast.success(`Sent back to ${assignee.name} for changes`);
+    toast.success(
+      assignee
+        ? `Sent back to ${assignee.name} for changes`
+        : "Submissions sent back for changes"
+    );
     setOpen(false);
     setNote("");
     router.refresh();
@@ -56,9 +60,19 @@ export function SendBackDialog({ taskId, assignee, trigger }) {
         <DialogHeader className="border-b p-4 sm:p-6">
           <DialogTitle>Send back for changes</DialogTitle>
           <DialogDescription>
-            Return {assignee.name}&apos;s submission for improvement. Your message
-            is emailed to them and added to the task&apos;s comments so they know
-            what to redo.
+            {assignee ? (
+              <>
+                Return {assignee.name}&apos;s submission for improvement. Your message
+                is emailed to them and added to the task&apos;s comments so they know
+                what to redo.
+              </>
+            ) : (
+              <>
+                Return submissions for improvement. Your message is emailed to the
+                respective assignees and added to the task&apos;s comments so they know
+                what to redo.
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
 

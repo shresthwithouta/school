@@ -24,7 +24,7 @@ import { toPlainText } from "@/lib/utils";
  * optional files. The files are private (only the assigner and management
  * reviewers can see them). On submit the assigner is emailed.
  */
-export function SubmitReviewDialog({ taskId, trigger }) {
+export function SubmitReviewDialog({ taskId, assigneeId, trigger }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -40,7 +40,7 @@ export function SubmitReviewDialog({ taskId, trigger }) {
     const res = await fetch(`/api/tasks/${taskId}/transition`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "submit", note, attachments: atts }),
+      body: JSON.stringify({ action: "submit", note, attachments: atts, assigneeId }),
     });
     const data = await res.json().catch(() => ({}));
     setBusy(false);

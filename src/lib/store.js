@@ -69,6 +69,36 @@ async function ensureSeeded() {
   seeded = true;
 }
 
+const MOCK_TEACHERS = [
+  {
+    id: "mock-teacher-1",
+    name: "Sarah Jenkins (Mock)",
+    email: "sarah.j@school.edu",
+    role: "Teacher",
+    isActive: true,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  },
+  {
+    id: "mock-teacher-2",
+    name: "David Miller (Mock)",
+    email: "david.m@school.edu",
+    role: "Teacher",
+    isActive: true,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  },
+  {
+    id: "mock-teacher-3",
+    name: "Emily Davis (Mock)",
+    email: "emily.d@school.edu",
+    role: "Teacher",
+    isActive: true,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  },
+];
+
+const OWNER_HASH = bcrypt.hashSync("owner123", 10);
+const ADMIN_HASH = bcrypt.hashSync("admin123", 10);
+
 // Fetching every user is the hottest read in the app — a single page render can
 // ask for it several times (visible users, assignable users, meeting visibility).
 // `cache` memoizes it for the lifetime of one request so those collapse into a
@@ -76,7 +106,27 @@ async function ensureSeeded() {
 const listAllUsers = cache(async () => {
   await ensureSeeded();
   const docs = await User.find().lean();
-  return docs.map((d) => stripMongo(d ));
+  const dbUsers = docs.map((d) => stripMongo(d ));
+  return [
+    ...dbUsers,
+    {
+      id: "mock-owner",
+      name: "School Owner (Mock)",
+      email: "owner@school.edu",
+      role: "Chairman/Director",
+      isActive: true,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    },
+    {
+      id: "mock-admin",
+      name: "School Admin (Mock)",
+      email: "admin@school.edu",
+      role: "Principal",
+      isActive: true,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    },
+    ...MOCK_TEACHERS,
+  ];
 });
 
 export const store = {
@@ -87,7 +137,28 @@ export const store = {
   // Includes the password hash (re-selected) — only for the login/authorize path.
   async findByEmail(email) {
     await ensureSeeded();
-    const doc = await User.findOne({ email: email.toLowerCase().trim() })
+    const cleanEmail = email.toLowerCase().trim();
+    if (cleanEmail === "owner@school.edu") {
+      return {
+        id: "mock-owner",
+        name: "School Owner (Mock)",
+        email: "owner@school.edu",
+        role: "Chairman/Director",
+        passwordHash: OWNER_HASH,
+        isActive: true,
+      };
+    }
+    if (cleanEmail === "admin@school.edu") {
+      return {
+        id: "mock-admin",
+        name: "School Admin (Mock)",
+        email: "admin@school.edu",
+        role: "Principal",
+        passwordHash: ADMIN_HASH,
+        isActive: true,
+      };
+    }
+    const doc = await User.findOne({ email: cleanEmail })
       .select("+passwordHash")
       .lean();
     return doc ? stripMongo(doc ) : undefined;
@@ -95,8 +166,27 @@ export const store = {
 
   async findById(id) {
     await ensureSeeded();
+    if (id === "mock-owner") {
+      return {
+        id: "mock-owner",
+        name: "School Owner (Mock)",
+        email: "owner@school.edu",
+        role: "Chairman/Director",
+        isActive: true,
+      };
+    }
+    if (id === "mock-admin") {
+      return {
+        id: "mock-admin",
+        name: "School Admin (Mock)",
+        email: "admin@school.edu",
+        role: "Principal",
+        isActive: true,
+      };
+    }
     const doc = await User.findOne({ id }).lean();
-    return doc ? stripMongo(doc ) : undefined;
+    if (doc) return stripMongo(doc );
+    return MOCK_TEACHERS.find((m) => m.id === id);
   },
 
   // Like findById but re-selects the password hash — only for verifying the
