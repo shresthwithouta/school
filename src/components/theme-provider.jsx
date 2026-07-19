@@ -40,7 +40,9 @@ export function ThemeProvider({ children }) {
   // theme after hydration completes.
   useEffect(() => {
     const stored = readStoredTheme();
-    setThemeState(stored);
+    setTimeout(() => {
+      setThemeState(stored);
+    }, 0);
     applyTheme(stored);
   }, []);
 
