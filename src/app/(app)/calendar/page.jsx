@@ -59,7 +59,7 @@ function buildEvents(user, tasks, meetings) {
         date: s.expectedDate,
         href: `/tasks/${t.key}/${s.key}`,
         done,
-        overdue: !done && new Date(s.expectedDate).getTime() < now,
+        overdue: !done && s.status !== "submitted" && new Date(s.expectedDate).getTime() < now,
         mine: true,
       });
     }

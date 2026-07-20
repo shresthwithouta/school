@@ -56,7 +56,10 @@ const DAY_MS = 86_400_000;
 function subtaskToRow(task, s) {
   const done = s.status === "done";
   const delayed =
-    !done && !!s.expectedDate && new Date(s.expectedDate).getTime() < Date.now();
+    !done &&
+    s.status !== "submitted" &&
+    !!s.expectedDate &&
+    new Date(s.expectedDate).getTime() < Date.now();
   const status = done
     ? "completed"
     : delayed

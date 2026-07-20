@@ -143,12 +143,17 @@ export function TaskPageClient({ task, assignees, currentUser }) {
       body: body ? JSON.stringify(body) : undefined,
     });
     const data = await res.json().catch(() => ({}));
-    setBusy(null);
     if (!res.ok) {
+      setBusy(null);
       toast.error(data.error ?? "Something went wrong");
       return false;
     }
-    startTransition(() => router.refresh());
+    // Keep busy until the server-side refresh completes so the button
+    // stays disabled while the page is still showing stale data.
+    startTransition(() => {
+      router.refresh();
+      setBusy(null);
+    });
     return true;
   }
 
@@ -339,6 +344,44 @@ export function TaskPageClient({ task, assignees, currentUser }) {
             <Lock className="size-3.5" />
             Submitted — awaiting review
           </p>
+        )}
+        {canReview && task.assignees.some((a) => a.status === "submitted") && (
+          <div className="mt-2 space-y-2 border-t pt-2">
+            <p className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">Acceptance</p>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                className="flex-1"
+                disabled={!!busy}
+                onClick={() => {
+                  if (busy) return;
+                  api(
+                    `/api/tasks/${task.id}/transition`,
+                    "POST",
+                    { action: "approve" },
+                    "review"
+                  );
+                }}
+              >
+                <Check className="size-4" />
+                Approve
+              </Button>
+              <SendBackDialog
+                taskId={task.id}
+                trigger={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1 text-amber-600 dark:text-amber-400"
+                    disabled={!!busy}
+                  >
+                    <Undo2 className="size-4" />
+                    Send back
+                  </Button>
+                }
+              />
+            </div>
+          </div>
         )}
       </div>
 
@@ -756,14 +799,15 @@ export function TaskPageClient({ task, assignees, currentUser }) {
                         size="sm"
                         className="flex-1"
                         disabled={!!busy}
-                        onClick={() =>
+                        onClick={() => {
+                          if (busy) return;
                           api(
                             `/api/tasks/${task.id}/transition`,
                             "POST",
                             { action: "approve" },
                             "review"
-                          )
-                        }
+                          );
+                        }}
                       >
                         <Check className="size-4" />
                         Approve
@@ -854,6 +898,42 @@ export function TaskPageClient({ task, assignees, currentUser }) {
                           </button>
                         )}
                       </div>
+                      {reviewable && (
+                        <div className="mt-2.5 flex gap-2 border-t pt-2.5">
+                          <Button
+                            size="sm"
+                            className="h-8 flex-1"
+                            disabled={!!busy}
+                            onClick={() => {
+                              if (busy) return;
+                              api(
+                                `/api/tasks/${task.id}/transition`,
+                                "POST",
+                                { action: "approve", assigneeId: a.id },
+                                "review"
+                              );
+                            }}
+                          >
+                            <Check className="size-4" />
+                            Approve
+                          </Button>
+                          <SendBackDialog
+                            taskId={task.id}
+                            assignee={a}
+                            trigger={
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 flex-1 text-amber-600 dark:text-amber-400"
+                                disabled={!!busy}
+                              >
+                                <Undo2 className="size-4" />
+                                Send back
+                              </Button>
+                            }
+                          />
+                        </div>
+                      )}
                     </li>
                   );
                 })}

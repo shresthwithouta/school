@@ -24,6 +24,7 @@
  * To re-map a role, change ROLE_TIERS and ROLE_RANKS below.
  */
 
+
 export const TIERS = {
   OWNER: "OWNER",
   ADMIN: "ADMIN",
@@ -31,12 +32,14 @@ export const TIERS = {
 };
 
 /** Canonical role values (stored in the DB). Top of list = highest authority. */
-export const ROLES = ["Admin", "Manager", "Teacher", "Staff"];
+export const ROLES = ["Admin", "Chairman/Director", "Manager", "Principal", "Teacher", "Staff"];
 
 /** Maps every role to its visibility tier. */
 export const ROLE_TIERS = {
   Admin: TIERS.OWNER,
+  "Chairman/Director": TIERS.OWNER,
   Manager: TIERS.ADMIN,
+  Principal: TIERS.ADMIN,
   Teacher: TIERS.WORKER,
   Staff: TIERS.WORKER,
 };
@@ -47,10 +50,13 @@ export const ROLE_TIERS = {
  *   1  Admin            → can assign to everyone
  *   2  Manager          → everyone except Admin
  *   3  Teacher, Staff    → each other only (same rank)
+ *  (Chairman/Director mapped to Admin authority; Principal to Manager authority)
  */
 export const ROLE_RANKS = {
   Admin: 1,
+  "Chairman/Director": 1,
   Manager: 2,
+  Principal: 2,
   Teacher: 3,
   Staff: 3,
 };

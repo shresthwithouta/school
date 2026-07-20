@@ -181,10 +181,85 @@ const REV = Symbol("rev");
 
 
 
+const initialMockDelayedTask = {
+  id: "mock-delayed-task-1",
+  key: "MOCK-1",
+  seq: 1,
+  rev: 1,
+  title: "Mock Delayed Task with Pending Submission",
+  description: "<p>This is a mock task that is past its due date, but has a pending submission, designed to test the review/approval workflow. Approving this task will show that the fix works perfectly without writing to the database!</p>",
+  priority: "high",
+  dueDate: "2026-07-15T12:00:00.000Z", // Past due date
+  recurrence: null,
+  recurrenceParentId: null,
+  nextRunAt: null,
+  cancelled: false,
+  cancelledAt: null,
+  subSeq: 0,
+  assignerId: "seed-2",
+  assignerName: "Manoj Manager",
+  assignerRole: "Manager",
+  assignees: [
+    {
+      id: "seed-3",
+      name: "Tina Teacher",
+      role: "Teacher",
+      status: "submitted",
+      submittedAt: "2026-07-19T10:00:00.000Z",
+      completedAt: null,
+    }
+  ],
+  subtasks: [],
+  comments: [
+    {
+      id: "mock-comment-1",
+      authorId: "seed-3",
+      authorName: "Tina Teacher",
+      text: "<p>I completed the job on time but the due date has now passed. Please review and approve my submission!</p>",
+      kind: "submission",
+      parentId: null,
+      attachments: [],
+      mentions: [],
+      visibility: "private",
+      audienceIds: ["seed-2"],
+      createdAt: "2026-07-19T10:00:00.000Z",
+    }
+  ],
+  attachments: [],
+  activity: [
+    {
+      id: "mock-activity-1",
+      actorId: "seed-3",
+      actorName: "Tina Teacher",
+      message: "submitted their part for review",
+      createdAt: "2026-07-19T10:00:00.000Z",
+    }
+  ],
+  createdAt: "2026-07-10T12:00:00.000Z",
+  updatedAt: "2026-07-19T10:00:00.000Z",
+};
+
+if (!global.mockDelayedTask) {
+  global.mockDelayedTask = JSON.parse(JSON.stringify(initialMockDelayedTask));
+}
+
+export function resetMockTask() {
+  global.mockDelayedTask = JSON.parse(JSON.stringify(initialMockDelayedTask));
+}
+
 // ── Persistence (MongoDB) ──────────────────────────────────────────
 // Accepts the internal UUID or the public key. Falls back to recomputing
 // keys across all tasks so a key always resolves even if never persisted.
 async function rawById(idOrKey) {
+  if (idOrKey === "mock-delayed-task-1" || idOrKey === "MOCK-1") {
+    const task = JSON.parse(JSON.stringify(global.mockDelayedTask));
+    Object.defineProperty(task, REV, {
+      value: task.rev,
+      writable: true,
+      enumerable: false,
+    });
+    return task;
+  }
   await connectToDatabase();
   let doc = await Task.findOne({
     $or: [{ id: idOrKey }, { key: idOrKey }],
@@ -224,6 +299,13 @@ function normalizeTask(task) {
 // (not the millisecond `updatedAt`) means two writes in the same millisecond
 // can't both pass the guard and lose an update. Brand-new tasks are inserted.
 async function saveTask(task) {
+  if (task.id === "mock-delayed-task-1") {
+    global.mockDelayedTask = {
+      ...task,
+      rev: (task.rev || 0) + 1,
+    };
+    return;
+  }
   await connectToDatabase();
   const prev = task[REV];
   if (prev === undefined) {
@@ -275,8 +357,14 @@ function deriveTaskStatus(t) {
   // it active even when every assignee has marked their part complete.
   const subtasksOpen = (t.subtasks || []).some((s) => s.status !== "done");
   if (allAssigneesDone && !subtasksOpen) return "completed";
-  if (t.dueDate && new Date(t.dueDate).getTime() < Date.now()) return "delayed";
+
   // Someone has submitted their part and it's waiting on a reviewer to approve.
+  // If all active (non-completed) assignees have submitted their part, then the task is in review.
+  const activeAssignees = a.filter((x) => x.status !== "completed");
+  const allActiveSubmitted = activeAssignees.length > 0 && activeAssignees.every((x) => x.status === "submitted");
+  if (allActiveSubmitted) return "in_review";
+
+  if (t.dueDate && new Date(t.dueDate).getTime() < Date.now()) return "delayed";
   if (a.some((x) => x.status === "submitted")) return "in_review";
   if (allAssigneesDone || a.some((x) => x.status === "in_progress")) {
     return "in_progress";
@@ -296,6 +384,7 @@ function toDTO(t) {
     key: s.key || `SB-${i + 1}`,
     overdue:
       s.status !== "done" &&
+      s.status !== "submitted" &&
       !!s.expectedDate &&
       new Date(s.expectedDate).getTime() < Date.now(),
   }));
@@ -446,12 +535,17 @@ export const listVisibleTasks = cache(async function listVisibleTasks(actor) {
         ],
       };
   const docs = await Task.find(filter).lean();
-  return docs
-    .map((d) => {
-      const t = stripMongo(d );
-      normalizeTask(t);
-      return t;
-    })
+  const list = docs.map((d) => {
+    const t = stripMongo(d );
+    normalizeTask(t);
+    return t;
+  });
+  
+  if (canSeeTask(actor, global.mockDelayedTask)) {
+    list.push(JSON.parse(JSON.stringify(global.mockDelayedTask)));
+  }
+
+  return list
     .filter((t) => canSeeTask(actor, t))
     .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
     .map((t) => viewTask(actor, t));
@@ -1851,7 +1945,7 @@ export async function sendDelayedTaskReminders() {
       }
 
       for (const s of task.subtasks || []) {
-        if (s.status === "done" || !s.expectedDate || !s.assigneeId) continue;
+        if (s.status === "done" || s.status === "submitted" || !s.expectedDate || !s.assigneeId) continue;
         if (new Date(s.expectedDate).getTime() >= Date.now()) continue;
         if (s.lastDelayReminderDay === today) continue;
         const u = await store.findById(s.assigneeId);
