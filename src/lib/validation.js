@@ -73,6 +73,24 @@ export const changePasswordSchema = z
     path: ["confirmPassword"],
   });
 
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().toLowerCase().min(1, "Email is required").email("Enter a valid email"),
+});
+
+export const resetPasswordSchema = z
+  .object({
+    token: z.string().min(1, "Missing reset token").max(200),
+    newPassword: z
+      .string()
+      .min(8, "New password must be at least 8 characters")
+      .max(100),
+    confirmPassword: z.string().min(1, "Please confirm your new password"),
+  })
+  .refine((d) => d.newPassword === d.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  });
+
  
 
 

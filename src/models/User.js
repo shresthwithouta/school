@@ -20,6 +20,10 @@ const UserSchema = new Schema(
     bio: { type: String, default: "" },
     isActive: { type: Boolean, default: true },
     mustChangePassword: { type: Boolean, default: false },
+    // Forgot-password: only a SHA-256 of the emailed token is stored, so a DB
+    // leak can't be replayed into a reset. Cleared once used.
+    resetTokenHash: { type: String, default: null, select: false, index: true },
+    resetTokenExpiresAt: { type: String, default: null, select: false },
     createdBy: { type: String, default: null },
     lastLoginAt: { type: String, default: null },
     createdAt: { type: String, required: true },

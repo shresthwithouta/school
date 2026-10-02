@@ -1,9 +1,11 @@
+import crypto from "crypto";
 import { cache } from "react";
 import bcrypt from "bcryptjs";
 
 import { AppError } from "@/lib/errors";
 import { connectToDatabase } from "@/lib/db";
 import { store, } from "@/lib/store";
+import { emailPasswordReset } from "@/lib/email";
 import Task from "@/models/Task";
 import Meeting from "@/models/Meeting";
 import {
@@ -332,4 +334,54 @@ export async function changeOwnPassword(
 
   const passwordHash = await bcrypt.hash(newPassword, 10);
   await store.update(userId, { passwordHash, mustChangePassword: false });
+}
+
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+// Don't re-send a reset email if one went out less than this long ago.
+const RESET_RESEND_COOLDOWN_MS = 60 * 1000;
+
+const hashResetToken = (token) =>
+  crypto.createHash("sha256").update(token).digest("hex");
+
+/**
+ * Forgot-password: emails a single-use reset link. Always resolves the same way
+ * whether or not the email exists, so the endpoint can't be used to discover
+ * which addresses have accounts.
+ */
+export async function requestPasswordReset(email) {
+  const u = await store.findByEmailForReset(email);
+  if (!u || !u.isActive) return;
+
+  // Throttle: the token's issue time is its expiry minus the TTL.
+  if (u.resetTokenExpiresAt) {
+    const issuedAt = new Date(u.resetTokenExpiresAt).getTime() - RESET_TOKEN_TTL_MS;
+    if (Date.now() - issuedAt < RESET_RESEND_COOLDOWN_MS) return;
+  }
+
+  const token = crypto.randomBytes(32).toString("base64url");
+  await store.update(u.id, {
+    resetTokenHash: hashResetToken(token),
+    resetTokenExpiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS).toISOString(),
+  });
+  await emailPasswordReset({
+    to: u.email,
+    name: u.name,
+    token,
+    expiresInLabel: "1 hour",
+  });
+}
+
+/** Sets a new password from a valid reset token, then burns the token. */
+export async function resetPasswordWithToken(token, newPassword) {
+  const u = await store.findByResetTokenHash(hashResetToken(token));
+  if (!u || !u.isActive) {
+    throw new AppError("This reset link is invalid or has expired.", 400);
+  }
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  await store.update(u.id, {
+    passwordHash,
+    mustChangePassword: false,
+    resetTokenHash: null,
+    resetTokenExpiresAt: null,
+  });
 }

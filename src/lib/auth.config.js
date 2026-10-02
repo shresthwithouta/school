@@ -30,8 +30,13 @@ export const authConfig = {
     authorized({ auth, request: { nextUrl } }) {
       const isLoggedIn = !!auth?.user;
       const { pathname } = nextUrl;
-      // Public, unauthenticated pages: the marketing landing page and login.
-      const isPublic = pathname === "/" || pathname === "/login";
+      // Public, unauthenticated pages: the marketing landing page, login and
+      // the forgot/reset-password flow.
+      const isPublic =
+        pathname === "/" ||
+        pathname === "/login" ||
+        pathname === "/forgot-password" ||
+        pathname === "/reset-password";
 
       if (isPublic) {
         // Signed-in staff skip the landing/login and go straight to the app.

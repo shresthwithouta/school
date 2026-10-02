@@ -197,6 +197,27 @@ export const store = {
     return doc ? stripMongo(doc ) : undefined;
   },
 
+  // Looks up the user holding a still-valid forgot-password token (by its hash).
+  async findByResetTokenHash(tokenHash) {
+    await connectToDatabase();
+    const doc = await User.findOne({
+      resetTokenHash: tokenHash,
+      resetTokenExpiresAt: { $gt: new Date().toISOString() },
+    })
+      .select("+resetTokenHash +resetTokenExpiresAt")
+      .lean();
+    return doc ? stripMongo(doc ) : undefined;
+  },
+
+  // Like findByEmail but only real DB users, with the reset-token fields.
+  async findByEmailForReset(email) {
+    await connectToDatabase();
+    const doc = await User.findOne({ email: email.toLowerCase().trim() })
+      .select("+resetTokenExpiresAt")
+      .lean();
+    return doc ? stripMongo(doc ) : undefined;
+  },
+
   async create(
     data
   ) {

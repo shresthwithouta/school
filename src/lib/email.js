@@ -394,3 +394,19 @@ export async function emailMention(args) {
     ),
   });
 }
+
+/** To a user who asked to reset their password: a single-use, expiring link. */
+export async function emailPasswordReset(args) {
+  await sendEmail({
+    to: args.to,
+    subject: "Reset your SWM password",
+    html: layout(
+      "Reset your password",
+      `Hi ${esc(args.name)}, we received a request to reset the password for your account. The link below works once and expires in ${esc(args.expiresInLabel)}. If you didn't ask for this, you can ignore this email — your password won't change.`,
+      {
+        label: "Reset password",
+        href: `${baseUrl()}/reset-password?token=${encodeURIComponent(args.token)}`,
+      }
+    ),
+  });
+}
